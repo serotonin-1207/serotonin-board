@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#242824">
+  <meta name="referrer" content="strict-origin">
+  <title>소방 업무 보드 · Serotonin</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css?v=0.1.1">
+  <script src="config.js?v=0.1.1" defer></script>
+  <script src="core.js?v=0.1.1" defer></script>
+  <script src="storage.js?v=0.2.0" defer></script>
+  <script src="app.js?v=0.1.1" defer></script>
+</head>
+<body>
+<svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <symbol id="i-board" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M3 10h18M10 10v11"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M14 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3v-8M14 3v7h7M14 3l7 7M7 14h10M7 17h7"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"/><circle cx="12" cy="12" r="10"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="m16 3 5 5-5 2-3 6-5-5 6-3zM8 16l-5 5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M5 7a8 8 0 0 1 14 0M19 17a8 8 0 0 1-14 0"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M16 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0" transform="translate(0 1) scale(.94)"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="10" cy="18" r="2"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+</svg>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="./index.html"><span class="brand-mark">S<span>·</span></span><span>Serotonin<small>함께 이어가는 기록</small></span></a>
+    <div class="workspace-label">WORKSPACE <span class="tiny-dot"></span></div>
+    <div class="workspace"><span class="workspace-icon">119</span><div>소방 업무 보드<small>공유기 · SSD 시험 운영</small></div></div>
+    <nav aria-label="보드 메뉴">
+      <button class="nav-item" data-view="calendar"><svg><use href="#i-calendar"/></svg>근무 달력</button>
+      <div class="nav-divider"></div>
+      <button class="nav-item active" data-view="all"><svg><use href="#i-board"/></svg>전체 메모<span class="nav-count" id="nav-total">0</span></button>
+      <button class="nav-item" data-view="인수인계"><svg><use href="#i-arrow"/></svg>인수인계</button>
+      <button class="nav-item" data-view="공지사항"><svg><use href="#i-pin"/></svg>공지사항</button>
+      <button class="nav-item" data-view="업무 메모"><svg><use href="#i-note"/></svg>업무 메모</button>
+      <div class="nav-divider"></div>
+      <button class="nav-item" data-view="done"><svg><use href="#i-check"/></svg>완료한 메모</button>
+      <button class="nav-item" data-view="trash"><svg><use href="#i-trash"/></svg>휴지통</button>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="storage-card"><span class="storage-dot" id="storage-dot"></span><div id="sidebar-storage">SSD 연결 확인 중<small>집에 있는 기록, 함께 보는 보드</small></div></div>
+      <button class="profile-button" id="profile-button"><span class="avatar" id="avatar">?</span><span id="profile-name">작성자 연결<small>공유 저장을 연결하세요</small></span><svg><use href="#i-settings"/></svg></button>
+      <span class="version">SEROTONIN BOARD · v0.1</span>
+    </div>
+  </aside>
+  <main>
+    <header class="topbar"><span><span class="breadcrumb">워크스페이스</span><span class="slash">/</span><strong id="breadcrumb-view">전체 메모</strong></span><span class="topbar-right"><span class="duty-badge" id="duty-badge" title="지금 근무 중인 팀"></span><span class="pilot-badge">시험 운영</span><span id="today-date"></span></span></header>
+    <div class="content">
+      <section class="heading-row"><div><p class="eyebrow">OUR SHARED WORKSPACE</p><h1 id="page-title">오늘의 기록을, 함께.</h1><p class="subtitle" id="page-subtitle">인수인계부터 작은 업무 메모까지. 한곳에 남기고 함께 확인하세요.</p></div><button class="primary" id="new-note"><svg><use href="#i-plus"/></svg>새 메모</button></section>
+      <div class="connection-strip" role="status"><span class="connection-label"><span class="status-dot" id="status-dot"></span><strong id="connection-status">SSD 연결 확인 중</strong></span><span id="last-sync">공유 기록을 불러오고 있습니다.</span><button class="text-button" id="refresh"><svg><use href="#i-refresh"/></svg>새로고침</button></div>
+      <div class="notice" id="connection-notice" hidden></div>
+      <section class="stats" id="stats" aria-label="메모 현황">
+        <div class="stat"><span class="stat-icon peach"><svg><use href="#i-note"/></svg></span><div><span>전체 메모</span><strong id="stat-total">0</strong></div><small>함께 쌓인 기록</small></div>
+        <div class="stat"><span class="stat-icon amber"><svg><use href="#i-clock"/></svg></span><div><span>진행할 업무</span><strong id="stat-open">0</strong></div><small>확인이 필요한 일</small></div>
+        <div class="stat"><span class="stat-icon mint"><svg><use href="#i-check"/></svg></span><div><span>완료한 업무</span><strong id="stat-done">0</strong></div><small>하나씩 마무리해요</small></div>
+        <div class="stat"><span class="stat-icon lilac"><svg><use href="#i-pin"/></svg></span><div><span>중요 메모</span><strong id="stat-pinned">0</strong></div><small>놓치지 않을 내용</small></div>
+      </section>
+      <section class="calendar-section" id="calendar-section" aria-label="근무 달력" hidden>
+        <div class="calendar-head">
+          <div class="calendar-nav" role="group" aria-label="날짜 이동">
+            <button class="secondary icon-button" id="cal-prev" aria-label="이전 달"><svg><use href="#i-chevron-left"/></svg></button>
+            <h2 id="cal-title" aria-live="polite">2026년 10월</h2>
+            <button class="secondary icon-button" id="cal-next" aria-label="다음 달"><svg><use href="#i-chevron-right"/></svg></button>
+            <button class="secondary" id="cal-today">오늘</button>
+            <label class="cal-jump">날짜 선택<input type="month" id="cal-month" min="2000-01" max="2099-12"></label>
+          </div>
+          <p class="duty-now" id="duty-now"></p>
+        </div>
+        <div class="calendar-legend" aria-label="근무 팀 범례"><span class="team-badge team-1">1팀</span><span class="team-badge team-2">2팀</span><span class="team-badge team-3">3팀</span><span>매일 09:00 교대 · 24시간 근무</span></div>
+        <div class="calendar-scroll">
+          <div class="calendar-weekdays" aria-hidden="true"><span class="sun">일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span class="sat">토</span></div>
+          <div class="calendar-grid" id="cal-grid" role="grid" aria-labelledby="cal-title"></div>
+        </div>
+        <div class="day-panel" id="day-panel" aria-live="polite"></div>
+      </section>
+      <section class="board-section" id="board-section">
+        <div class="section-top"><div><h2 id="section-title">함께 보는 메모 <span id="result-count">0</span></h2><p id="section-caption">최근 수정한 기록부터 보여 드립니다.</p></div><button class="secondary" id="share-link"><svg><use href="#i-link"/></svg>링크 복사</button></div>
+        <div class="toolbar"><div class="tabs" role="group" aria-label="업무 상태"><button class="tab active" data-status="all">전체</button><button class="tab" data-status="todo">미처리</button><button class="tab" data-status="doing">진행 중</button><button class="tab" data-status="done">완료</button></div><label class="search"><svg><use href="#i-search"/></svg><input id="search" type="search" placeholder="제목, 내용, 작성자 검색" aria-label="메모 검색"></label></div>
+        <div class="board-grid" id="note-grid" aria-live="polite"></div>
+        <div class="empty-state" id="empty-state" hidden><div class="empty-art"><svg><use href="#i-note"/></svg><span>+</span></div><h3 id="empty-title">첫 번째 기록을 남겨 보세요.</h3><p id="empty-description">새 메모를 작성하면 같은 보드에 접속한 동료도 볼 수 있어요.</p><button class="secondary" id="empty-new">첫 메모 작성<svg><use href="#i-arrow"/></svg></button></div>
+      </section>
+      <footer><span><span class="footer-dot"></span>기록은 공유기에 연결된 SSD에 보관합니다.</span><button class="text-button" id="settings-button">연결 설정</button></footer>
+    </div>
+  </main>
+</div>
+<dialog id="editor-dialog" class="editor-dialog">
+  <form id="editor-form"><div class="dialog-heading"><div><p class="eyebrow">SHARED NOTE</p><h2 id="editor-title">새 메모</h2></div><button type="button" class="close-button" id="editor-close" aria-label="닫기">×</button></div>
+    <p class="form-message" id="editor-message" role="status" hidden></p>
+    <label>제목<input id="note-title" maxlength="120" required placeholder="무엇을 함께 확인할까요?"></label>
+    <div class="form-columns" id="memo-fields"><label>분류<select id="note-category"><option>인수인계</option><option>공지사항</option><option>업무 메모</option></select></label><label>처리 상태<select id="note-status"><option value="todo">미처리</option><option value="doing">진행 중</option><option value="done">완료</option></select></label></div>
+    <div id="schedule-fields" hidden>
+      <label>일정 종류<select id="schedule-kind"><option>휴가</option><option>교육</option><option>교대</option><option>훈련</option><option>기타</option></select></label>
+      <div class="form-columns"><label>시작일<input type="date" id="schedule-date" min="2000-01-01" max="2099-12-31"></label><label>종료일 (하루면 비워 두세요)<input type="date" id="schedule-end" min="2000-01-01" max="2099-12-31"></label></div>
+    </div>
+    <label>내용<textarea id="note-content" maxlength="10000" rows="8" placeholder="전달할 내용, 확인할 사항, 다음에 할 일을 적어 주세요. Ctrl+Enter로 저장할 수 있어요."></textarea></label>
+    <label class="checkbox-label"><input type="checkbox" id="note-pinned">중요 메모로 상단에 고정</label>
+    <div class="editor-meta"><span id="editor-author"></span><span id="editor-history-label"></span></div>
+    <div class="dialog-actions"><button type="button" class="danger-text" id="note-trash" hidden><svg><use href="#i-trash"/></svg>휴지통으로</button><span class="action-spacer"></span><button type="button" class="secondary" id="editor-cancel">취소</button><button type="submit" class="primary" id="save-note">SSD에 저장<svg><use href="#i-check"/></svg></button></div>
+  </form>
+</dialog>
+<dialog id="settings-dialog" class="settings-dialog">
+  <div class="dialog-heading"><div><p class="eyebrow">CONNECTION</p><h2>작성자와 공유 저장 연결</h2></div><button class="close-button" id="settings-close" aria-label="닫기">×</button></div>
+  <p class="settings-intro">공유기의 로그인과 SSD 저장 기능을 이용하는 시험판입니다.</p>
+  <label>표시 이름<input id="author-name" maxlength="40" placeholder="메모에 표시할 이름" autocomplete="nickname"></label>
+  <label data-router>공유기 로그인 주소<input id="router-origin" type="url" placeholder="http://192.168.0.1"></label>
+  <div class="setup-step" data-router><span>1</span><div><strong>공유기에서 게스트 로그인</strong><p>개인별 게스트 계정으로 로그인하세요. 비밀번호는 이 보드에 저장하지 않습니다.</p><button class="secondary" id="router-login">게스트 로그인 열기<svg><use href="#i-arrow"/></svg></button></div></div>
+  <div data-cloud hidden><label>Supabase 프로젝트 주소<input id="supabase-url" type="url" placeholder="https://프로젝트번호.supabase.co" autocomplete="off"></label><label>공개 publishable 키<input id="supabase-key" placeholder="sb_publishable_…" autocomplete="off" spellcheck="false"></label><label>접속 코드 (처음 한 번만)<input id="supabase-code" type="password" placeholder="관리자에게 받은 코드" autocomplete="off" spellcheck="false"></label><p class="settings-intro">테스트 프로젝트의 공개 키만 사용합니다. secret 또는 service_role 키는 입력하지 마세요. 설정은 이 브라우저에 보관합니다.</p></div>
+  <div class="setup-step"><span>2</span><div><strong>SSD 저장 연결 확인</strong><p>시험 파일을 저장하고 다시 읽어 확인합니다.</p><button class="primary" id="connect-storage">연결 확인<svg><use href="#i-check"/></svg></button></div></div>
+  <div class="signing-box" id="signing-box" hidden>
+    <strong>내 서명 열쇠</strong>
+    <p class="settings-intro" id="signing-status"></p>
+    <label>공개 열쇠<input id="signing-public" readonly></label>
+    <div class="signing-actions"><button type="button" class="secondary" id="signing-copy">등록 정보 복사</button><button type="button" class="secondary" id="signing-backup">개인 열쇠 백업</button><button type="button" class="secondary" id="signing-restore">개인 열쇠 복원</button></div>
+  </div>
+  <p class="form-message" id="settings-result" role="status" hidden></p>
+  <div class="pilot-notice"><strong>현재는 내부망 시험용입니다.</strong><p>표시 이름은 본인 인증이 아닙니다. 자체 회원가입과 계정별 권한은 아직 구현되지 않았습니다. 현재 URL 서비스에는 열람 인증이 꺼져 있으므로 민감한 업무자료를 입력하지 마세요.</p></div>
+  <div class="settings-links"><a href="../index.html" id="comparison-link" hidden>두 버전 비교</a><button class="text-button" id="export-backup">메모 백업 내려받기</button></div>
+</dialog>
+<dialog id="history-dialog" class="history-dialog"><div class="dialog-heading"><div><p class="eyebrow">NOTE HISTORY</p><h2>수정 기록</h2></div><button class="close-button" id="history-close" aria-label="닫기">×</button></div><p class="history-intro" id="history-intro"></p><div id="history-list"></div></dialog>
+<div id="toast" class="toast" role="status" hidden></div>
+<noscript>이 보드는 브라우저의 JavaScript 기능이 필요합니다.</noscript>
+</body></html>

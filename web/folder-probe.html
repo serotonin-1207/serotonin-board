@@ -1,0 +1,61 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>폴더별 쓰기 권한 시험</title>
+<style>body{font:16px/1.8 system-ui;background:#f6f5f2;color:#242831;max-width:780px;margin:40px auto;padding:24px}button{font:inherit;padding:12px 20px;background:#dc593b;color:white;border:0;border-radius:12px}button:disabled{opacity:.5}label{display:block;margin:14px 0 4px;font-weight:600}input,textarea{font:inherit;width:100%;padding:10px;border:1px solid #d9dccf;border-radius:8px;box-sizing:border-box}table{border-collapse:collapse;width:100%;margin-top:18px;font-size:14px}td,th{border-bottom:1px solid #e1e3d8;padding:8px;text-align:left;overflow-wrap:anywhere}.ok{color:#2f7a4a;font-weight:700}.no{color:#a8321a;font-weight:700}small{color:#6f776a}</style>
+<h1>폴더별 쓰기 권한 시험</h1>
+<p>지금 공유기에 로그인한 계정으로 아래 폴더마다 시험 파일을 저장해 보고, URL 서비스로 다시 읽어 확인합니다. 계정마다 쓸 수 있는 폴더가 다른지, 게스트가 보드 폴더 밖에도 쓸 수 있는지 알아내는 시험입니다.</p>
+<label for="origin">공유기 주소 (업로드를 받는 주소)</label>
+<input id="origin" value="">
+<label for="base">기준 폴더 (공유기 경로)</label>
+<input id="base" value="/HDD1/serotonin-board-tests/guest">
+<label for="folders">시험할 폴더 (한 줄에 하나, 기준 폴더 기준 상대 경로)</label>
+<textarea id="folders" rows="5">data
+probe-A
+probe-B
+..</textarea>
+<small>예: 계정 A로 로그인해 두고 <b>probe-A</b>는 저장되고 <b>probe-B</b>는 거부되면 계정별 폴더 권한이 작동하는 것입니다. <b>..</b>는 기준 폴더의 위 폴더이며, 저장되면 이 계정이 보드 폴더 밖에도 쓸 수 있다는 뜻입니다.</small>
+<p><button id="run">시험 시작</button></p>
+<table id="out" hidden><thead><tr><th>폴더</th><th>저장 위치</th><th>결과</th></tr></thead><tbody></tbody></table>
+<p id="note"></p>
+<script>
+const $=id=>document.getElementById(id);
+$('origin').value='http://'+location.hostname;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function resolveFolder(base,line){
+  const url=new URL(line.replace(/^\/+|\/+$/g,'')+'/', 'http://x'+base.replace(/\/+$/,'')+'/');
+  return decodeURIComponent(url.pathname).replace(/\/+$/,'');
+}
+async function probe(origin,base,line){
+  const destination=resolveFolder(base,line);
+  const id=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+  const name='folder-probe-'+id+'.json';
+  const content=JSON.stringify({type:'folder-probe',id,folder:line,at:new Date().toISOString()});
+  const form=new FormData();form.append('file',new Blob([content],{type:'application/json'}),name);
+  const endpoint=new URL('/cgi/upload.cgi',origin);
+  endpoint.search=new URLSearchParams({destination,task_id:'upload_'+id,filename:name,relative_path:name});
+  try{await fetch(endpoint,{method:'POST',body:form,mode:'no-cors',credentials:'include',referrerPolicy:'strict-origin',signal:AbortSignal.timeout(10000)});}
+  catch(e){return {destination,ok:false,detail:'요청 실패: '+e.message};}
+  const readUrl=new URL(line.replace(/^\/+|\/+$/g,'')+'/'+name,location.href);
+  for(let i=0;i<7;i++){
+    try{
+      const r=await fetch(readUrl+'?_='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(5000)});
+      if(r.ok)return (await r.text())===content?{destination,ok:true,detail:'저장되고 같은 내용으로 읽힘'}:{destination,ok:false,detail:'읽은 내용이 다름'};
+      if(r.status!==404)return {destination,ok:false,detail:'읽기 확인 실패 (HTTP '+r.status+')'};
+    }catch(e){return {destination,ok:false,detail:'읽기 요청 실패: '+e.message};}
+    await sleep(600);
+  }
+  return {destination,ok:false,detail:'저장되지 않음 (권한 없음, 폴더 없음 또는 로그인 만료)'};
+}
+$('run').onclick=async()=>{
+  const button=$('run');button.disabled=true;$('out').hidden=false;
+  const body=$('out').querySelector('tbody');body.replaceChildren();$('note').textContent='';
+  const base=$('base').value.trim();
+  const lines=[...new Set($('folders').value.split('\n').map(s=>s.trim()).filter(Boolean))];
+  for(const line of lines){
+    const row=body.insertRow();row.insertCell().textContent=line;row.insertCell().textContent='시험 중…';row.insertCell();
+    const r=await probe($('origin').value.trim(),base,line);
+    row.cells[1].textContent=r.destination;
+    const status=row.cells[2];status.textContent=(r.ok?'✔ ':'✖ ')+r.detail;status.className=r.ok?'ok':'no';
+  }
+  $('note').textContent='시험 파일(folder-probe-*.json)은 파일 탐색기에서 관리자가 지울 수 있습니다. 다른 계정으로 바꿔 같은 시험을 반복해 결과를 비교하세요.';
+  button.disabled=false;
+};
+</script></html>

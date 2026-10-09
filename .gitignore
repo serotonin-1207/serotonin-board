@@ -1,0 +1,6 @@
+.work/
+node_modules/
+artifacts/
+dist/
+*.log
+web/storage.js
