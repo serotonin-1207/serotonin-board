@@ -88,3 +88,6 @@
 .signing-actions{display:flex;gap:8px;flex-wrap:wrap}
 .signing-actions .secondary{font-size:11px;min-height:36px;padding:8px 12px}
 @media(max-width:680px){.sign-badge{font-size:9px;padding:2px 4px}}
+/* 두 번 눌러 확인하는 버튼 */
+button.armed{background:#a8321a!important;border-color:#a8321a!important;color:#fff!important}
+button.armed svg{color:#fff}

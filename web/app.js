@@ -386,7 +386,7 @@
     $('note-trash').hidden = !note;
     $('editor-message').hidden = true;
     $('save-note').disabled = false;
-    pendingConfirm = null;
+    disarm();
     editing.snapshot = editorSnapshot();
     $('editor-dialog').showModal();
     $('note-title').focus();
@@ -501,19 +501,35 @@
     );
   }
   // Two-step confirmation inside the dialog: browser confirm() boxes can be blocked (embedded browsers), which left the dialog impossible to close.
+  // The first press only arms the button (its label changes and a toast explains); the same press again within 6 seconds confirms.
   let pendingConfirm = null,
-    pendingTimer;
-  function confirmAgain(key, message) {
+    pendingTimer,
+    armedButton = null;
+  function disarm() {
+    clearTimeout(pendingTimer);
+    pendingConfirm = null;
+    if (armedButton) {
+      armedButton.lastChild.textContent = armedButton.dataset.label;
+      armedButton.classList.remove('armed');
+      armedButton = null;
+    }
+  }
+  function confirmAgain(key, message, button, armedLabel) {
     if (pendingConfirm === key) {
-      pendingConfirm = null;
+      disarm();
       return true;
     }
+    disarm();
     pendingConfirm = key;
-    showMessage('editor-message', message + ' (한 번 더 누르면 진행합니다)');
-    clearTimeout(pendingTimer);
+    armedButton = button;
+    button.dataset.label = button.lastChild.textContent;
+    button.lastChild.textContent = armedLabel;
+    button.classList.add('armed');
+    showMessage('editor-message', message);
+    toast(message + ' 같은 버튼을 한 번 더 누르면 진행합니다.');
     pendingTimer = setTimeout(() => {
       if (pendingConfirm === key) {
-        pendingConfirm = null;
+        disarm();
         $('editor-message').hidden = true;
       }
     }, 6000);
@@ -521,9 +537,13 @@
   }
   function closeEditor() {
     if (saving) return;
-    if (editing && editorSnapshot() !== editing.snapshot && !confirmAgain('close', '저장하지 않은 변경이 있습니다. 닫으면 사라집니다.'))
+    if (
+      editing &&
+      editorSnapshot() !== editing.snapshot &&
+      !confirmAgain('close', '저장하지 않은 변경이 있습니다. 닫으면 사라집니다.', $('editor-cancel'), '변경 버리고 닫기')
+    )
       return;
-    pendingConfirm = null;
+    disarm();
     $('editor-dialog').close();
     editing = null;
   }
@@ -888,7 +908,8 @@
     }
   });
   $('note-trash').onclick = () => {
-    if (confirmAgain('trash', '휴지통으로 옮깁니다. 수정 기록에서 복구할 수 있습니다.')) saveEditor(true);
+    if (confirmAgain('trash', '휴지통으로 옮깁니다. 수정 기록에서 복구할 수 있습니다.', $('note-trash'), '정말 휴지통으로 이동'))
+      saveEditor(true);
   };
   $('history-close').onclick = () => $('history-dialog').close();
   $('share-link').onclick = () => copyText(new URL('./index.html', location.href).href, '보드 링크를 복사했습니다.');
