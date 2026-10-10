@@ -12,7 +12,11 @@ async function actor(user=a,anonymous=true,member=true,dept='d1'){await db.exec(
 async function append(event){return (await db.query('select public.serotonin_append_test_event($1::jsonb) as event',[JSON.stringify(event)])).rows[0].event;}
 before(async()=>{
  db=new PGlite();
- await db.exec(`create role anon;create role authenticated;create schema auth;
+ await db.exec(`create role anon;create role authenticated;create schema auth;create schema storage;
+ create table storage.buckets(id text primary key, name text, public boolean, file_size_limit bigint);
+ create table storage.objects(id uuid primary key default gen_random_uuid(), bucket_id text, name text, owner uuid, metadata jsonb);
+ alter table storage.objects enable row level security;
+ grant usage on schema storage to anon,authenticated;
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.test.user',true),'')::uuid$$;
  create function auth.jwt() returns jsonb language sql stable as $$select coalesce(nullif(current_setting('request.test.jwt',true),''),'{}')::jsonb$$;
  grant usage on schema public,auth to anon,authenticated;`);

@@ -3,6 +3,9 @@ import * as signing from './signing.mjs';
 import * as cache from './cache.mjs';
 
 const { canonical } = signing;
+export const FILE_BUCKET = 'board-files',
+  MAX_FILE_BYTES = 50 * 1024 * 1024,
+  MAX_KEEP_MINUTES = 7 * 24 * 60;
 const PAGE_SIZE = 500,
   OVERLAP_MS = 120000,
   FULL_RELOAD_AFTER_MS = 7 * 24 * 3600 * 1000; // a safety net for rows an administrator removed on the server
@@ -261,6 +264,112 @@ export class SupabaseStorage {
     this.mark = newest || this.mark;
     if (full) this.fullAt = Date.now();
     return [...merged.values()];
+  }
+  // ===== File sharing (private bucket, same department only, kept at most 7 days) =====
+  fileMessage(error) {
+    const text = String(error?.message || error || '');
+    const known = [
+      [/space is full/, '부서 파일 공간이 가득 찼습니다. 쓰지 않는 파일을 삭제해 주세요.'],
+      [/Too many uploads/, '짧은 시간에 너무 많이 올렸습니다. 잠시 뒤 다시 시도해 주세요.'],
+      [/50 MB/, '파일은 하나당 50MB까지 올릴 수 있습니다.'],
+      [/Retention/, '보관 기간은 1분 이상 7일 이하로 정해 주세요.'],
+      [/Access code required/, '접속 코드 등록이 필요합니다.'],
+      [/Upload is not complete/, '업로드가 끝까지 되지 않았습니다. 다시 올려 주세요.'],
+      [/still stored/, '파일이 아직 저장소에 남아 있습니다.'],
+    ];
+    for (const [pattern, message] of known) if (pattern.test(text)) return message;
+    return text;
+  }
+  async fileList() {
+    await this.session();
+    const result = await this.client.rpc('serotonin_file_list');
+    if (result.error)
+      throw new Error('파일 목록을 읽지 못했습니다: ' + this.fileMessage(result.error) + ' · setup.sql 실행 여부를 확인해 주세요.');
+    return result.data;
+  }
+  async fileBegin({ name, size, mime, minutes }) {
+    await this.session();
+    const result = await this.client.rpc('serotonin_file_begin', {
+      p_name: name,
+      p_size: size,
+      p_mime: mime || null,
+      p_keep_minutes: minutes,
+    });
+    if (result.error) throw new Error(this.fileMessage(result.error));
+    return result.data;
+  }
+  // XMLHttpRequest instead of fetch so the page can show upload progress and cancel an upload.
+  async fileUpload(path, file, { onProgress, signal } = {}) {
+    await this.session();
+    const session = (await this.client.auth.getSession()).data.session;
+    if (!session) throw new Error('로그인 상태를 확인하지 못했습니다. 연결을 다시 확인해 주세요.');
+    const base = new URL(this.options.url()).origin;
+    const body = new FormData();
+    body.append('cacheControl', '3600');
+    body.append('', file);
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', base + '/storage/v1/object/' + FILE_BUCKET + '/' + path);
+      xhr.setRequestHeader('Authorization', 'Bearer ' + session.access_token);
+      xhr.setRequestHeader('apikey', this.options.key());
+      xhr.setRequestHeader('x-upsert', 'false');
+      if (onProgress) xhr.upload.onprogress = event => event.lengthComputable && onProgress(event.loaded / event.total);
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) return resolve();
+        let detail = '';
+        try {
+          detail = JSON.parse(xhr.responseText).message || '';
+        } catch {
+          /* not JSON */
+        }
+        reject(new Error('업로드에 실패했습니다 (' + xhr.status + ')' + (detail ? ': ' + detail : '')));
+      };
+      xhr.onerror = () => reject(new Error('네트워크 오류로 업로드가 끊겼습니다. 다시 시도해 주세요.'));
+      xhr.onabort = () => reject(Object.assign(new Error('업로드를 취소했습니다.'), { name: 'AbortError' }));
+      if (signal) {
+        if (signal.aborted) return xhr.abort();
+        signal.addEventListener('abort', () => xhr.abort(), { once: true });
+      }
+      xhr.send(body);
+    });
+  }
+  async fileFinish(id) {
+    const result = await this.client.rpc('serotonin_file_finish', { p_id: id });
+    if (result.error) throw new Error(this.fileMessage(result.error));
+    return result.data;
+  }
+  // A signed address that works for one minute and forces a download (never opens the file inside this site).
+  async fileDownloadUrl(file) {
+    await this.session();
+    const result = await this.client.storage.from(FILE_BUCKET).createSignedUrl(file.path, 60, { download: file.name });
+    if (result.error || !result.data?.signedUrl) throw new Error('내려받을 주소를 만들지 못했습니다. 이미 삭제되었을 수 있습니다.');
+    return result.data.signedUrl;
+  }
+  // The stored object is removed through the Storage API first (deleting rows with SQL would leave the bytes behind);
+  // only then is its record forgotten.
+  async fileRemove(file) {
+    await this.session();
+    const removed = await this.client.storage.from(FILE_BUCKET).remove([file.path]);
+    if (removed.error) throw new Error('파일을 삭제하지 못했습니다: ' + removed.error.message);
+    const forgot = await this.client.rpc('serotonin_file_forget', { p_id: file.id });
+    if (forgot.error) throw new Error(this.fileMessage(forgot.error));
+    return true;
+  }
+  // Removes expired files (and uploads that never finished) of this department; any member's browser can do it.
+  async filePurge() {
+    await this.session();
+    const expired = await this.client.rpc('serotonin_file_expired');
+    if (expired.error) throw new Error(this.fileMessage(expired.error));
+    let removed = 0;
+    for (const file of expired.data || []) {
+      try {
+        await this.fileRemove(file);
+        removed++;
+      } catch {
+        /* retried on the next purge */
+      }
+    }
+    return removed;
   }
   async append(event) {
     await this.session();

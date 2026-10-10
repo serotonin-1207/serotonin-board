@@ -27,6 +27,9 @@
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="10" cy="18" r="2"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V9zM14 3v6h6"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0-4 4m4-4 4 4M4 15v3a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-3"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12m0 0-4-4m4 4 4-4M4 19h16"/></symbol>
   <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
   <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/></symbol>
   <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
@@ -40,6 +43,7 @@
     <nav aria-label="보드 메뉴">
       <button class="nav-item" data-view="calendar"><svg><use href="#i-calendar"/></svg>근무 달력</button>
       <button class="nav-item" data-view="handover"><svg><use href="#i-check"/></svg>인수인계<span class="nav-count" id="nav-handover" hidden>0</span></button>
+      <button class="nav-item" data-view="files" data-cloud hidden><svg><use href="#i-file"/></svg>파일</button>
       <div class="nav-divider"></div>
       <button class="nav-item active" data-view="all"><svg><use href="#i-board"/></svg>전체 메모<span class="nav-count" id="nav-total">0</span></button>
       <button class="nav-item" data-view="공지사항"><svg><use href="#i-pin"/></svg>공지사항</button>
@@ -65,6 +69,30 @@
         <div class="stat"><span class="stat-icon amber"><svg><use href="#i-clock"/></svg></span><div><span>진행할 업무</span><strong id="stat-open">0</strong></div><small>확인이 필요한 일</small></div>
         <div class="stat"><span class="stat-icon mint"><svg><use href="#i-check"/></svg></span><div><span>완료한 업무</span><strong id="stat-done">0</strong></div><small>하나씩 마무리해요</small></div>
         <div class="stat"><span class="stat-icon lilac"><svg><use href="#i-pin"/></svg></span><div><span>중요 메모</span><strong id="stat-pinned">0</strong></div><small>놓치지 않을 내용</small></div>
+      </section>
+      <section class="files-section" id="files-section" aria-label="파일 주고받기" hidden>
+        <div class="file-drop" id="file-drop">
+          <div class="file-drop-main">
+            <svg><use href="#i-upload"/></svg>
+            <div><strong>파일을 끌어다 놓거나 선택하세요</strong><span>파일 하나당 최대 50MB · 종류 제한 없음 · 같은 부서원만 볼 수 있습니다</span></div>
+          </div>
+          <div class="file-actions">
+            <label class="file-keep">보관 기간
+              <select id="file-keep">
+                <option value="10080">7일 (최대)</option><option value="4320">3일</option><option value="1440">1일</option>
+                <option value="360">6시간</option><option value="60">1시간</option><option value="custom">직접 지정…</option>
+              </select>
+            </label>
+            <label class="file-keep" id="file-custom-wrap" hidden>삭제 시각<input type="datetime-local" id="file-custom"></label>
+            <button class="primary" type="button" id="file-pick"><svg><use href="#i-upload"/></svg>파일 선택</button>
+            <button class="secondary" type="button" id="file-camera-button" hidden>사진 찍기</button>
+          </div>
+          <input type="file" id="file-input" multiple hidden>
+          <input type="file" id="file-camera" accept="image/*" capture="environment" hidden>
+        </div>
+        <ul class="file-uploads" id="file-uploads" aria-live="polite"></ul>
+        <div class="ho-progress"><div class="ho-bar" role="progressbar" id="file-meter" aria-valuemin="0" aria-valuemax="100"><span id="file-meter-fill"></span></div><strong id="file-meter-text"></strong></div>
+        <ul class="file-list" id="file-list"></ul>
       </section>
       <section class="handover-section" id="handover-section" aria-label="인수인계" hidden>
         <div class="handover-head">

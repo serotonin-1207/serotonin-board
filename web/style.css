@@ -143,3 +143,36 @@ button.armed svg{color:#fff}
 .export-item strong{font-size:14px;font-weight:650}
 .export-item em{font-style:normal;font-size:11px;font-weight:600;color:#66775a;background:#eef2e8;border-radius:5px;padding:2px 7px;margin-left:6px}
 .export-item span{font-size:12px;color:#6e7964;line-height:1.7}
+/* ===== 파일 주고받기 ===== */
+.files-section{margin-bottom:8px}
+.file-drop{display:flex;flex-direction:column;gap:14px;border:2px dashed #cfd6c3;border-radius:16px;background:#fff;padding:18px 20px;margin-bottom:16px;transition:background .15s,border-color .15s}
+.file-drop.over{background:#fffaf6;border-color:#e59a83}
+.file-drop-main{display:flex;gap:14px;align-items:center}
+.file-drop-main>svg{width:30px;height:30px;color:#7ba36c}
+.file-drop-main strong{display:block;font-size:15px;font-weight:650}
+.file-drop-main span{display:block;font-size:12px;color:#6e7964;margin-top:4px;line-height:1.6}
+.file-actions{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.file-keep{display:flex;flex-direction:column;gap:5px;margin:0;font-size:11px;color:#6e7964}
+.file-keep select,.file-keep input{border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:#fcfdf9;color:var(--ink);font-size:13px;min-height:42px}
+.file-uploads,.file-list{list-style:none;margin:0 0 14px;padding:0;display:flex;flex-direction:column;gap:8px}
+.file-upload{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(80px,1fr) auto auto;gap:12px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 14px;font-size:12px}
+.file-upload-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.file-upload-state{color:#5f6c55;white-space:nowrap}
+.file-upload.failed{border-color:#e7b9a8;background:#fff6f1}
+.file-upload.failed .file-upload-state{color:#a8321a;white-space:normal}
+.file-item{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:12px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
+.file-icon{width:40px;height:40px;border-radius:10px;background:#eef2e8;color:#66775a;display:grid;place-items:center;font-size:10px;font-weight:700;letter-spacing:.3px}
+.file-name{border:0;background:none;padding:0;text-align:left;color:inherit;font-size:14px;font-weight:600;overflow-wrap:anywhere;line-height:1.5}
+.file-name:hover{text-decoration:underline}
+.file-btn{font-size:11px;min-height:36px;padding:8px 12px}
+.file-del{border:0;background:none;display:flex;align-items:center;gap:5px;font-size:11px;color:#b17c64;padding:8px 6px;border-radius:8px}
+.file-del svg{width:14px;height:14px}
+.file-del.armed{background:#a8321a;color:#fff}
+.file-left{background:#eef2e8;color:#52653f;border-radius:5px;padding:1px 7px;font-weight:600}
+.file-left.soon{background:#fff1e1;color:#a7652c}
+@media(max-width:680px){
+  .file-drop{padding:16px}.file-actions .primary,.file-actions .secondary{flex:1}.file-actions .file-keep{flex:1 1 100%}
+  .file-item{grid-template-columns:auto minmax(0,1fr);row-gap:10px}.file-item .file-btn,.file-item .file-del{grid-column:2}
+  .file-item .file-btn{justify-self:start}.file-item .file-del{justify-self:end;margin-top:-46px}
+  .file-upload{grid-template-columns:1fr auto;row-gap:8px}.file-upload .ho-bar{grid-column:1/-1;order:3}
+}

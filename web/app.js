@@ -282,6 +282,10 @@
     const pending = core.handoverOn(notes, todayKey(), rotating).filter(item => !item.done).length;
     $('nav-handover').textContent = pending;
     $('nav-handover').hidden = !pending;
+    if (view === 'files') {
+      renderFiles();
+      return;
+    }
     if (view === 'handover') {
       renderHandover();
       return;
@@ -902,6 +906,236 @@
     ].join('\n');
     copyText(text, '인수인계 목록을 복사했습니다.');
   };
+
+  // ===== 파일 주고받기 =====
+  const MAX_FILE_BYTES = 50 * 1024 * 1024;
+  let fileData = { files: [], used: 0, quota: 0 },
+    filesLoaded = false,
+    filesBusy = false,
+    lastPurge = 0,
+    uploadSeq = 0;
+  const uploads = new Map();
+  function sizeLabel(bytes) {
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(bytes >= 10485760 ? 0 : 1) + 'MB';
+    if (bytes >= 1024) return Math.round(bytes / 1024) + 'KB';
+    return bytes + 'B';
+  }
+  function remainingLabel(expiresAt) {
+    const minutes = Math.floor((Date.parse(expiresAt) - Date.now()) / 60000);
+    if (minutes < 1) return '곧 삭제';
+    if (minutes < 60) return minutes + '분 남음';
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours + '시간 ' + (minutes % 60) + '분 남음';
+    return Math.floor(hours / 24) + '일 ' + (hours % 24) + '시간 남음';
+  }
+  // Anyone's browser removes this department's expired files; at most once every 10 minutes.
+  async function purgeFiles(force = false) {
+    if (!cloud || !storage.filePurge || (!force && Date.now() - lastPurge < 600000)) return;
+    lastPurge = Date.now();
+    try {
+      await storage.filePurge();
+    } catch {
+      /* retried later */
+    }
+  }
+  async function refreshFiles() {
+    if (!cloud || !storage.fileList || !synced) return renderFiles();
+    try {
+      await purgeFiles();
+      fileData = await storage.fileList();
+      filesLoaded = true;
+    } catch (error) {
+      toast(error.message);
+    }
+    renderFiles();
+  }
+  function renderFiles() {
+    const meter = fileData.quota ? Math.min(100, Math.round((fileData.used / fileData.quota) * 100)) : 0;
+    $('file-meter-fill').style.width = meter + '%';
+    $('file-meter').setAttribute('aria-valuenow', String(meter));
+    $('file-meter-text').textContent = fileData.quota ? '부서 파일함 ' + sizeLabel(fileData.used) + ' / ' + sizeLabel(fileData.quota) : '';
+    const list = fileData.files;
+    if (!list.length) {
+      $('file-list').replaceChildren(
+        el('li', 'ho-empty', !synced ? '연결 후 파일이 표시됩니다.' : filesLoaded ? '아직 올린 파일이 없습니다.' : '불러오는 중…'),
+      );
+      return;
+    }
+    $('file-list').replaceChildren(
+      ...list.map(file => {
+        const li = el('li', 'file-item');
+        const name = el('button', 'file-name', file.name);
+        name.type = 'button';
+        name.title = '눌러서 내려받기';
+        name.onclick = () => downloadFile(file, name);
+        const soon = Date.parse(file.expiresAt) - Date.now() < 3600000;
+        const meta = el('p', 'ho-meta');
+        meta.append(
+          el('span', '', sizeLabel(file.size)),
+          el('span', '', (file.by || '이름 없음') + ' 올림'),
+          el('time', '', timeLabel(file.createdAt)),
+        );
+        meta.append(el('span', 'file-left' + (soon ? ' soon' : ''), remainingLabel(file.expiresAt)));
+        const text = el('div', 'ho-text');
+        text.append(name, meta);
+        const get = el('button', 'secondary file-btn');
+        get.type = 'button';
+        get.append(icon('download'), document.createTextNode('내려받기'));
+        get.onclick = () => downloadFile(file, get);
+        const del = el('button', 'file-del');
+        del.type = 'button';
+        del.append(icon('trash'), document.createTextNode('삭제'));
+        del.setAttribute('aria-label', file.name + ' 삭제');
+        del.onclick = () => deleteFile(file, del);
+        li.append(el('span', 'file-icon', (file.name.split('.').pop() || 'file').slice(0, 4).toUpperCase()), text, get, del);
+        return li;
+      }),
+    );
+  }
+  async function downloadFile(file, button) {
+    button.disabled = true;
+    try {
+      const url = await storage.fileDownloadUrl(file);
+      const a = el('a');
+      a.href = url;
+      a.download = file.name;
+      document.body.append(a);
+      a.click();
+      a.remove();
+    } catch (error) {
+      toast(error.message);
+      refreshFiles();
+    } finally {
+      setTimeout(() => (button.disabled = false), 1500);
+    }
+  }
+  let deleteArmed = null,
+    deleteTimer;
+  async function deleteFile(file, button) {
+    if (deleteArmed !== file.id) {
+      deleteArmed = file.id;
+      button.classList.add('armed');
+      button.lastChild.textContent = '정말 삭제';
+      toast('"' + file.name + '"을(를) 지웁니다. 같은 버튼을 한 번 더 누르면 바로 삭제되며 되돌릴 수 없습니다.');
+      clearTimeout(deleteTimer);
+      deleteTimer = setTimeout(() => {
+        deleteArmed = null;
+        renderFiles();
+      }, 5000);
+      return;
+    }
+    deleteArmed = null;
+    button.disabled = true;
+    try {
+      await storage.fileRemove(file);
+      toast('삭제했습니다.');
+    } catch (error) {
+      toast(error.message);
+    }
+    refreshFiles();
+  }
+  function keepMinutes() {
+    const choice = $('file-keep').value;
+    if (choice !== 'custom') return Number(choice);
+    const at = Date.parse($('file-custom').value);
+    if (!Number.isFinite(at)) throw new Error('삭제할 날짜와 시각을 정해 주세요.');
+    const minutes = Math.ceil((at - Date.now()) / 60000);
+    if (minutes < 1 || minutes > 7 * 24 * 60) throw new Error('삭제 시각은 지금부터 7일 이내여야 합니다.');
+    return minutes;
+  }
+  function uploadRow(file) {
+    const id = ++uploadSeq;
+    const li = el('li', 'file-upload');
+    const label = el('span', 'file-upload-name', file.name + ' · ' + sizeLabel(file.size));
+    const bar = el('div', 'ho-bar');
+    const fill = el('span');
+    bar.append(fill);
+    const state = el('span', 'file-upload-state', '준비 중…');
+    const cancel = el('button', 'text-button', '취소');
+    cancel.type = 'button';
+    li.append(label, bar, state, cancel);
+    $('file-uploads').append(li);
+    const controller = new AbortController();
+    cancel.onclick = () => controller.abort();
+    uploads.set(id, controller);
+    return {
+      signal: controller.signal,
+      progress: ratio => {
+        fill.style.width = Math.round(ratio * 100) + '%';
+        state.textContent = Math.round(ratio * 100) + '%';
+      },
+      status: text => (state.textContent = text),
+      done: () => {
+        uploads.delete(id);
+        li.remove();
+      },
+      fail: message => {
+        uploads.delete(id);
+        li.classList.add('failed');
+        state.textContent = message;
+        cancel.textContent = '닫기';
+        cancel.onclick = () => li.remove();
+      },
+    };
+  }
+  async function uploadFiles(fileList) {
+    const picked = [...fileList];
+    if (!picked.length || !handoverWritable()) return;
+    let minutes;
+    try {
+      minutes = keepMinutes();
+    } catch (error) {
+      return toast(error.message);
+    }
+    await purgeFiles(true);
+    for (const file of picked) {
+      const row = uploadRow(file);
+      try {
+        if (!file.size) throw new Error('빈 파일은 올릴 수 없습니다.');
+        if (file.size > MAX_FILE_BYTES)
+          throw new Error('파일이 50MB 한도를 넘었습니다 (' + file.size.toLocaleString('ko-KR') + '바이트). 나누거나 줄여서 올려 주세요.');
+        row.status('공간 확인 중…');
+        const reserved = await storage.fileBegin({ name: file.name, size: file.size, mime: file.type, minutes });
+        row.status('0%');
+        try {
+          await storage.fileUpload(reserved.path, file, { onProgress: row.progress, signal: row.signal });
+          row.status('확인 중…');
+          await storage.fileFinish(reserved.id);
+        } catch (error) {
+          // Give the reserved space back right away instead of waiting for the hourly cleanup.
+          storage.fileRemove({ id: reserved.id, path: reserved.path }).catch(() => {});
+          throw error;
+        }
+        row.done();
+        toast('"' + file.name + '"을(를) 올렸습니다. ' + remainingLabel(reserved.expiresAt) + '.');
+      } catch (error) {
+        row.fail(error.name === 'AbortError' ? '취소했습니다.' : error.message);
+      }
+      await refreshFiles();
+    }
+  }
+  $('file-pick').onclick = () => $('file-input').click();
+  $('file-camera-button').onclick = () => $('file-camera').click();
+  // Phones and tablets get a "take a photo" button that opens the camera directly.
+  $('file-camera-button').hidden = !window.matchMedia('(pointer: coarse)').matches;
+  for (const input of [$('file-input'), $('file-camera')])
+    input.onchange = () => {
+      const chosen = [...input.files];
+      input.value = '';
+      uploadFiles(chosen);
+    };
+  $('file-keep').onchange = () => {
+    $('file-custom-wrap').hidden = $('file-keep').value !== 'custom';
+    if (!$('file-custom-wrap').hidden) {
+      const soon = new Date(Date.now() + 3600000 - new Date().getTimezoneOffset() * 60000);
+      $('file-custom').value = soon.toISOString().slice(0, 16);
+    }
+  };
+  for (const type of ['dragenter', 'dragover'])
+    $('file-drop').addEventListener(type, event => (event.preventDefault(), $('file-drop').classList.add('over')));
+  for (const type of ['dragleave', 'drop'])
+    $('file-drop').addEventListener(type, event => (event.preventDefault(), $('file-drop').classList.remove('over')));
+  $('file-drop').addEventListener('drop', event => uploadFiles(event.dataTransfer?.files || []));
   function setView(next) {
     view = next;
     document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
@@ -916,31 +1150,38 @@
               ? '근무 달력'
               : view === 'handover'
                 ? '인수인계'
-                : view;
+                : view === 'files'
+                  ? '파일'
+                  : view;
     $('breadcrumb-view').textContent = name;
     $('page-title').textContent = view === 'all' ? '오늘의 기록을, 함께.' : name;
     $('page-subtitle').textContent =
       view === 'all'
         ? '인수인계부터 작은 업무 메모까지. 한곳에 남기고 함께 확인하세요.'
-        : view === 'handover'
-          ? '체크해서 마무리하고, 끝나지 않은 일은 다음 근무일로 자동으로 넘어갑니다.'
-          : view === 'calendar'
-            ? '24시간 3팀 근무와 휴가·교육·교대·훈련 일정을 함께 확인하세요.'
-            : view === 'trash'
-              ? '필요한 기록은 수정 이력에서 다시 복구할 수 있어요.'
-              : view === 'done'
-                ? '함께 마무리한 업무와 확인한 내용을 모아 봅니다.'
-                : '동료에게 전달할 내용을 남기고, 진행 상황을 함께 확인하세요.';
+        : view === 'files'
+          ? '같은 부서원끼리 주고받는 임시 파일함입니다. 올린 파일은 최대 7일 뒤 자동으로 삭제됩니다.'
+          : view === 'handover'
+            ? '체크해서 마무리하고, 끝나지 않은 일은 다음 근무일로 자동으로 넘어갑니다.'
+            : view === 'calendar'
+              ? '24시간 3팀 근무와 휴가·교육·교대·훈련 일정을 함께 확인하세요.'
+              : view === 'trash'
+                ? '필요한 기록은 수정 이력에서 다시 복구할 수 있어요.'
+                : view === 'done'
+                  ? '함께 마무리한 업무와 확인한 내용을 모아 봅니다.'
+                  : '동료에게 전달할 내용을 남기고, 진행 상황을 함께 확인하세요.';
     $('section-title').firstChild.textContent = view === 'all' ? '함께 보는 메모 ' : name + ' ';
     const calendar = view === 'calendar',
-      handover = view === 'handover';
+      handover = view === 'handover',
+      files = view === 'files';
     $('calendar-section').hidden = !calendar;
     $('handover-section').hidden = !handover;
-    $('board-section').hidden = calendar || handover;
-    $('stats').hidden = calendar || handover;
-    $('new-note').lastChild.textContent = calendar ? '일정 추가' : handover ? '항목 추가' : '새 메모';
+    $('files-section').hidden = !files;
+    $('board-section').hidden = calendar || handover || files;
+    $('stats').hidden = calendar || handover || files;
+    $('new-note').lastChild.textContent = calendar ? '일정 추가' : handover ? '항목 추가' : files ? '파일 선택' : '새 메모';
     render();
     if (handover) $('ho-input').focus({ preventScroll: true });
+    if (files) refreshFiles();
   }
   function showMonth(year, month) {
     if (year < 2000 || year > 2099) return;
@@ -1092,7 +1333,9 @@
       ? openEditor(undefined, { schedule: true, date: selectedDay })
       : view === 'handover'
         ? $('ho-input').focus()
-        : openEditor();
+        : view === 'files'
+          ? $('file-pick').click()
+          : openEditor();
   $('empty-new').onclick = () => openEditor();
   $('cal-prev').onclick = () => shiftMonth(-1);
   $('cal-next').onclick = () => shiftMonth(1);
@@ -1411,6 +1654,7 @@
       weekday: 'short',
     }).format(new Date());
     renderDuty();
+    if (view === 'files') renderFiles();
     const today = todayKey();
     if (today !== lastToday) {
       // The shift changed at 09:00: a handover list that was showing "today" rolls over to the new shift day.
@@ -1422,11 +1666,28 @@
   dateLabel();
   setInterval(dateLabel, 60000);
   updateProfile();
+  // A returning member (saved name, existing temporary account) is connected again without pressing "연결 확인",
+  // so a phone can open the board and upload right away.
+  async function autoConnect() {
+    if (!cloud || !author || !cloudUrl || !cloudKey || !currentUserId()) return;
+    try {
+      identity = await storage.connect({ name: author });
+      applyDept(identity.dept);
+      writeConnected = true;
+      updateProfile();
+    } catch {
+      /* not a member (any more) or offline: the settings dialog explains what to do when writing is attempted */
+    }
+  }
   restoreCache()
     .catch(() => {})
+    .then(autoConnect)
     .then(() => refresh().catch(() => {}));
   setInterval(() => {
-    if (!document.hidden && !saving) refresh().catch(() => {});
+    if (document.hidden || saving) return;
+    refresh().catch(() => {});
+    if (view === 'files' && !uploads.size) refreshFiles();
+    else if (synced) purgeFiles();
   }, cfg.pollMilliseconds);
   // Coming back to the tab refreshes at once, but never more often than every 5 seconds (tab switching must not flood the server).
   let lastVisibleRefresh = 0;
@@ -1436,7 +1697,7 @@
     refresh().catch(() => {});
   });
   window.addEventListener('beforeunload', event => {
-    if ($('editor-dialog').open) {
+    if ($('editor-dialog').open || uploads.size) {
       event.preventDefault();
       event.returnValue = '';
     }
