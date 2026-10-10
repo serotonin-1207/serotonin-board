@@ -26,6 +26,7 @@ test('after the first full read only newer rows are fetched, with an overlap, an
   const calls = [];
   const storage = new SupabaseStorage({ maxEvents: 20000 }, {});
   storage.session = async () => ({ id: 'u' });
+  storage.dept = { id: 'd1', name: '1부서', rotating: true };
   storage.client = {
     from: () => {
       const q = { since: null };
@@ -47,6 +48,6 @@ test('after the first full read only newer rows are fetched, with an overlap, an
   assert.ok(Date.parse(calls[1]) <= Date.parse('2026-10-09T10:05:00Z') && Date.parse(calls[1]) >= Date.parse('2026-10-09T10:02:30Z')); // 2 min before the newest row seen
   const third = await storage.list(new Map(second.map(e => [e.id, e])));
   assert.equal(third.length, 3); // overlap re-reads rows without duplicating them
-  for (let i = 0; i < 20; i++) await storage.list(new Map(third.map(e => [e.id, e])));
+  for (let i = 0; i < 2000; i++) await storage.list(new Map(third.map(e => [e.id, e])));
   assert.ok(calls.filter(c => c === null).length >= 2); // safety-net full re-read happened again
 });

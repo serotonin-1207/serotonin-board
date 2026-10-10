@@ -4,7 +4,7 @@ import * as signing from './signing.mjs';
 const { canonical } = signing;
 const PAGE_SIZE = 500,
   OVERLAP_MS = 120000,
-  FULL_RELOAD_EVERY = 20;
+  FULL_RELOAD_EVERY = 2000; // about 8 hours of polling; the overlap window already covers late-committing rows
 
 export function publicSupabaseConfig(url, key) {
   let parsed;
@@ -187,26 +187,33 @@ export class SupabaseStorage {
     const result = await this.client.rpc('serotonin_test_connection');
     if (result.error) throw new Error('테스트 저장소 연결 실패: ' + result.error.message + ' · setup.sql 실행 여부를 확인해 주세요.');
     if (result.data?.userId !== user.id) throw new Error('저장 서비스의 계정 확인 결과가 다릅니다.');
+    this.dept = result.data.dept || null;
     return result.data.member === true;
   }
-  // The access code is only needed once per temporary account; the server remembers the membership.
-  async connect({ code } = {}) {
+  // The access code is only needed once per temporary account; the server remembers the membership. An account belongs to
+  // exactly one department: the code decides which, and a code for another department cannot move an existing member.
+  async connect({ code, name } = {}) {
     const user = await this.session();
-    if (!(await this.checkMembership(user))) {
-      if (!code) throw new Error('접속 코드를 입력해 주세요. 관리자에게 받은 코드를 한 번 입력하면 이 브라우저가 등록됩니다.');
-      const joined = await this.client.rpc('serotonin_join_test_board', { code });
+    let already = false;
+    if (await this.checkMembership(user)) already = !!code;
+    else {
+      if (!code)
+        throw new Error('접속 코드를 입력해 주세요. 부서 관리자에게 받은 코드를 한 번 입력하면 이 브라우저가 그 부서에 등록됩니다.');
+      const joined = await this.client.rpc('serotonin_join_test_board', { code, display_name: name || null });
       if (joined.error) throw new Error('접속 코드 확인 실패: ' + joined.error.message + ' · setup.sql 실행 여부를 확인해 주세요.');
       if (joined.data?.member !== true)
         throw new Error(
           joined.data?.error === 'locked' ? '접속 코드를 여러 번 틀렸습니다. 1시간 뒤 다시 시도해 주세요.' : '접속 코드가 맞지 않습니다.',
         );
+      this.dept = joined.data.dept || null;
     }
-    return { id: user.id, kind: user.is_anonymous ? 'anonymous' : 'account' };
+    return { id: user.id, kind: user.is_anonymous ? 'anonymous' : 'account', dept: this.dept, already };
   }
   // Revisions never change, so after a full first read only rows saved since the last read are fetched. The window overlaps by two
   // minutes (a transaction can commit slightly out of saved_at order) and every 20th read is a full re-read as a safety net.
   async list(previous = new Map()) {
     const user = await this.session();
+    if (!this.dept) await this.checkMembership(user);
     this.reads = (this.reads || 0) + 1;
     const full = !previous.size || !this.mark || this.reads % FULL_RELOAD_EVERY === 0;
     const merged = full ? new Map() : new Map(previous);

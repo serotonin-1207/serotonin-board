@@ -49,9 +49,16 @@
   // drop off. Past days are rebuilt from the revision history, so nothing is ever lost.
   const HANDOVER_CATEGORY = '인수인계';
   const MEMO_CATEGORIES = ['공지사항', '업무 메모'];
-  // The shift day D ends at 09:00 KST on D+1, which is 00:00 UTC on D+1.
-  function dayEndMs(day) {
-    return (dayNumber(day) + 1) * DAY_MS;
+  // Rotating (24h shift) departments change day at 09:00 KST = 00:00 UTC; office departments change day at midnight KST.
+  const KST_OFFSET_MS = 9 * 3600000;
+  function dayOffsetMs(rotating) {
+    return rotating ? 0 : KST_OFFSET_MS;
+  }
+  function dayOfAt(at, rotating = true) {
+    return new Date(Date.parse(at) + dayOffsetMs(rotating)).toISOString().slice(0, 10);
+  }
+  function dayEndMs(day, rotating = true) {
+    return (dayNumber(day) + 1) * DAY_MS - dayOffsetMs(rotating);
   }
   function stateAt(note, limitMs) {
     let last = null;
@@ -61,8 +68,8 @@
     }
     return last;
   }
-  function handoverOn(notes, day) {
-    const endMs = dayEndMs(day),
+  function handoverOn(notes, day, rotating = true) {
+    const endMs = dayEndMs(day, rotating),
       startMs = endMs - DAY_MS,
       items = [];
     for (const note of notes) {
@@ -72,7 +79,7 @@
       const before = stateAt(note, startMs);
       const done = end.note.status === 'done';
       if (before && !before.note.deleted && before.note.status === 'done' && done) continue;
-      const createdDay = dutyDay(note.history[0].at);
+      const createdDay = dayOfAt(note.history[0].at, rotating);
       items.push({ note, state: end, done, pinned: end.note.pinned, createdDay, carriedDays: Math.max(0, daysBetween(createdDay, day)) });
     }
     return items.sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.note.history[0].at.localeCompare(b.note.history[0].at) || a.note.id.localeCompare(b.note.id));
@@ -170,6 +177,7 @@
     HANDOVER_CATEGORY,
     MEMO_CATEGORIES,
     handoverOn,
+    dayOfAt,
     TEAM_COUNT,
     SHIFT_START_HOUR,
     validEvent,

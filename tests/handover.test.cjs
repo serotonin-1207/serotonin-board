@@ -58,3 +58,14 @@ test('important items come first, other categories and schedules are ignored', (
   assert.deepEqual(day(notes, '2026-10-08').map(r => r[0]), ['항목 2', '항목 1']);
   assert.ok(notes.every(n => validEvent(n.history[0])));
 });
+
+test('office (non-rotating) departments change day at midnight Korean time, not at 09:00', () => {
+  // 2026-10-09T10:00Z = 19:00 KST on 10-09 ; 2026-10-09T16:00Z = 01:00 KST on 10-10
+  const notes = buildNotes([rev(1, 1, '2026-10-09T10:00:00.000Z', []), rev(2, 1, '2026-10-09T16:00:00.000Z', [1], { status: 'done' })]);
+  const office = d => handoverOn(notes, d, false).map(i => [i.done ? 'done' : 'open', i.carriedDays]);
+  assert.deepEqual(office('2026-10-09'), [['open', 0]]);
+  assert.deepEqual(office('2026-10-10'), [['done', 1]]);   // completed 01:00 KST on 10-10 = still 10-10
+  assert.deepEqual(office('2026-10-11'), []);              // gone the day after
+  // the same data for a rotating department: 01:00 KST on 10-10 still belongs to shift day 10-09
+  assert.deepEqual(handoverOn(notes, '2026-10-09').map(i => i.done), [true]);
+});

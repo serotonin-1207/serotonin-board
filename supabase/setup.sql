@@ -1,73 +1,105 @@
--- Public comparison TEST board only. New tables, no existing board data touched.
--- Run in a dedicated free Supabase test project. Enable Anonymous Sign-Ins first.
+-- Serotonin board: Supabase schema (0.5.0, departments). Safe to run more than once.
+-- Run in a dedicated free Supabase project. Enable Anonymous Sign-Ins first.
+-- Upgrading a project that ran an older setup.sql? Run supabase/migrations/0.5.0-departments.sql first.
 begin;
+
+-- Departments: each has its own access code (stored only as a SHA-256 hash) and sees only its own revisions.
+-- rotating = true for 3-team 24h shifts (day changes at 09:00), false for office staff (day changes at midnight).
+create table if not exists public.serotonin_depts (
+  id text primary key check (id ~ '^[a-z0-9_-]{2,30}$'),
+  name text not null check (length(btrim(name)) between 1 and 40),
+  rotating boolean not null default true,
+  code_hash text not null unique
+);
+
 create table if not exists public.serotonin_test_events (
   id text primary key check (id ~ '^[a-f0-9]{32}$'),
   note_id text not null check (note_id ~ '^[a-f0-9]{32}$'),
+  dept text not null references public.serotonin_depts(id),
   actor_id uuid not null,
   saved_at timestamptz not null default now(),
   event jsonb not null
 );
 create index if not exists serotonin_test_events_saved_at on public.serotonin_test_events(saved_at);
-alter table public.serotonin_test_events enable row level security;
-revoke all on public.serotonin_test_events from public, anon, authenticated;
-grant select on public.serotonin_test_events to authenticated;
+create index if not exists serotonin_test_events_dept_saved_at on public.serotonin_test_events(dept, saved_at);
 
--- Access code gate: the project URL and publishable key are public, so a temporary account alone must not grant
--- access. An account becomes a member only by presenting the access code once (see serotonin_join_test_board).
+-- An account (a browser's temporary account) belongs to exactly one department.
 create table if not exists public.serotonin_test_members (
   user_id uuid primary key,
+  dept text not null references public.serotonin_depts(id),
+  name text,
   joined_at timestamptz not null default now()
-);
-create table if not exists public.serotonin_test_secret (
-  id int primary key check (id = 1),
-  code_hash text not null
 );
 create table if not exists public.serotonin_test_join_failures (
   id bigint generated always as identity primary key,
   user_id uuid not null,
   failed_at timestamptz not null default now()
 );
-alter table public.serotonin_test_members enable row level security;
-alter table public.serotonin_test_secret enable row level security;
-alter table public.serotonin_test_join_failures enable row level security;
-revoke all on public.serotonin_test_members, public.serotonin_test_secret, public.serotonin_test_join_failures from public, anon, authenticated;
 
+alter table public.serotonin_depts enable row level security;
+alter table public.serotonin_test_events enable row level security;
+alter table public.serotonin_test_members enable row level security;
+alter table public.serotonin_test_join_failures enable row level security;
+revoke all on public.serotonin_depts, public.serotonin_test_events, public.serotonin_test_members, public.serotonin_test_join_failures from public, anon, authenticated;
+grant select on public.serotonin_test_events to authenticated;
+
+create or replace function public.serotonin_my_dept() returns text
+language sql stable security definer set search_path = '' as $$
+  select dept from public.serotonin_test_members where user_id = auth.uid();
+$$;
 create or replace function public.serotonin_is_member() returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists(select 1 from public.serotonin_test_members where user_id = auth.uid());
 $$;
-revoke all on function public.serotonin_is_member() from public, anon;
-grant execute on function public.serotonin_is_member() to authenticated;
+create or replace function public.serotonin_dept_info() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('id', d.id, 'name', d.name, 'rotating', d.rotating)
+  from public.serotonin_test_members m join public.serotonin_depts d on d.id = m.dept
+  where m.user_id = auth.uid();
+$$;
+revoke all on function public.serotonin_my_dept(), public.serotonin_is_member(), public.serotonin_dept_info() from public, anon;
+grant execute on function public.serotonin_my_dept(), public.serotonin_is_member(), public.serotonin_dept_info() to authenticated;
 
 drop policy if exists "test_users_read_events" on public.serotonin_test_events;
 drop policy if exists "test_members_read_events" on public.serotonin_test_events;
-create policy "test_members_read_events" on public.serotonin_test_events for select to authenticated using (public.serotonin_is_member());
+drop policy if exists "dept_members_read_events" on public.serotonin_test_events;
+create policy "dept_members_read_events" on public.serotonin_test_events for select to authenticated
+  using (dept = public.serotonin_my_dept());
 
+-- Presenting a department's code once makes this account a member of that department only.
 -- Wrong codes are returned (not raised) so that the failure is recorded; five misses lock the account for an hour.
-create or replace function public.serotonin_join_test_board(code text) returns jsonb
+drop function if exists public.serotonin_join_test_board(text);
+create or replace function public.serotonin_join_test_board(code text, display_name text default null) returns jsonb
 language plpgsql security definer set search_path = '' as $$
+declare
+  found_dept text;
 begin
   if auth.uid() is null then raise exception 'Authentication required'; end if;
-  if public.serotonin_is_member() then return jsonb_build_object('member', true); end if;
+  if public.serotonin_is_member() then
+    return jsonb_build_object('member', true, 'already', true, 'dept', public.serotonin_dept_info());
+  end if;
   if (select count(*) from public.serotonin_test_join_failures where user_id = auth.uid() and failed_at > now() - interval '1 hour') >= 5
   then return jsonb_build_object('member', false, 'error', 'locked'); end if;
-  if exists(select 1 from public.serotonin_test_secret where id = 1 and code_hash = encode(sha256(convert_to(coalesce(code, ''), 'UTF8')), 'hex')) then
-    insert into public.serotonin_test_members(user_id) values (auth.uid()) on conflict do nothing;
-    return jsonb_build_object('member', true);
+  select id into found_dept from public.serotonin_depts
+    where code_hash = encode(sha256(convert_to(coalesce(code, ''), 'UTF8')), 'hex');
+  if found_dept is not null then
+    insert into public.serotonin_test_members(user_id, dept, name)
+      values (auth.uid(), found_dept, nullif(left(btrim(coalesce(display_name, '')), 40), ''))
+      on conflict do nothing;
+    return jsonb_build_object('member', true, 'dept', public.serotonin_dept_info());
   end if;
   insert into public.serotonin_test_join_failures(user_id) values (auth.uid());
   return jsonb_build_object('member', false, 'error', 'invalid');
 end;
 $$;
-revoke all on function public.serotonin_join_test_board(text) from public, anon;
-grant execute on function public.serotonin_join_test_board(text) to authenticated;
+revoke all on function public.serotonin_join_test_board(text, text) from public, anon;
+grant execute on function public.serotonin_join_test_board(text, text) to authenticated;
 
 create or replace function public.serotonin_test_connection() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 begin
   if auth.uid() is null then raise exception 'Authentication required'; end if;
-  return jsonb_build_object('userId',auth.uid(),'mode','public-test','member',public.serotonin_is_member());
+  return jsonb_build_object('userId',auth.uid(),'mode','public-test','member',public.serotonin_is_member(),'dept',public.serotonin_dept_info());
 end;
 $$;
 
@@ -75,12 +107,13 @@ create or replace function public.serotonin_append_test_event(input jsonb) retur
 language plpgsql security definer set search_path = '' as $$
 declare
   user_id uuid := auth.uid();
+  my_dept text := public.serotonin_my_dept();
   parent_id text;
   record jsonb;
   old_record public.serotonin_test_events%rowtype;
 begin
   if user_id is null then raise exception 'Authentication required'; end if;
-  if not public.serotonin_is_member() then raise exception 'Access code required'; end if;
+  if my_dept is null then raise exception 'Access code required'; end if;
   if octet_length(input::text) > 65000 then raise exception 'Event payload too large'; end if;
   if jsonb_typeof(input) is distinct from 'object'
     or input->>'schema' is distinct from '1'
@@ -102,8 +135,6 @@ begin
     or jsonb_typeof(input#>'{note,pinned}') is distinct from 'boolean'
     or jsonb_typeof(input#>'{note,deleted}') is distinct from 'boolean'
   then raise exception 'Invalid note'; end if;
-  -- Calendar schedules: category '일정' requires kind and date (endDate optional, at most 60 days later).
-  -- Other categories must not carry schedule fields.
   if input#>>'{note,category}' = '일정' then
     if jsonb_typeof(input#>'{note,date}') is distinct from 'string'
       or input#>>'{note,date}' !~ '^\d{4}-\d{2}-\d{2}$'
@@ -121,27 +152,27 @@ begin
   if exists(select 1 from jsonb_array_elements(input->'parents') p where jsonb_typeof(p) <> 'string')
     or (select count(*) from jsonb_array_elements_text(input->'parents')) <> (select count(distinct p) from jsonb_array_elements_text(input->'parents') p)
   then raise exception 'Invalid parent list'; end if;
-  -- Serializes this small test board; avoids quota races and parent creation races.
+  -- Serializes appends; avoids quota races and parent creation races.
   lock table public.serotonin_test_events in share row exclusive mode;
   select * into old_record from public.serotonin_test_events where id=input->>'id';
   if found then
-    if old_record.actor_id=user_id and old_record.note_id=input->>'noteId'
+    if old_record.dept=my_dept and old_record.actor_id=user_id and old_record.note_id=input->>'noteId'
       and old_record.event->'note'=input->'note' and old_record.event->'parents'=input->'parents'
     then return old_record.event; end if;
     raise exception 'Revision ID already used';
   end if;
-  if (select count(*) from public.serotonin_test_events) >= 20000 then raise exception 'Test revision limit reached'; end if;
+  if (select count(*) from public.serotonin_test_events where dept=my_dept) >= 20000 then raise exception 'Test revision limit reached'; end if;
   if (select count(*) from public.serotonin_test_events where actor_id=user_id and saved_at > now()-interval '1 minute') >= 30 then raise exception 'Please wait before saving again'; end if;
   for parent_id in select jsonb_array_elements_text(input->'parents') loop
     if parent_id !~ '^[a-f0-9]{32}$' or parent_id=input->>'id'
-      or not exists(select 1 from public.serotonin_test_events where id=parent_id and note_id=input->>'noteId')
+      or not exists(select 1 from public.serotonin_test_events where id=parent_id and note_id=input->>'noteId' and dept=my_dept)
     then raise exception 'Parent revision missing or belongs to another note'; end if;
   end loop;
   if jsonb_array_length(input->'parents')=0 and exists(select 1 from public.serotonin_test_events where note_id=input->>'noteId') then raise exception 'Existing note requires a parent revision'; end if;
   record := jsonb_build_object('schema',1,'id',input->>'id','noteId',input->>'noteId','parents',input->'parents',
     'at',to_char(clock_timestamp() at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),'note',input->'note',
     'actor',jsonb_build_object('id',user_id,'kind',case when coalesce((auth.jwt()->>'is_anonymous')::boolean,false) then 'anonymous' else 'account' end));
-  insert into public.serotonin_test_events(id,note_id,actor_id,event) values(input->>'id',input->>'noteId',user_id,record);
+  insert into public.serotonin_test_events(id,note_id,dept,actor_id,event) values(input->>'id',input->>'noteId',my_dept,user_id,record);
   return record;
 end;
 $$;
@@ -151,8 +182,12 @@ grant execute on function public.serotonin_test_connection() to authenticated;
 grant execute on function public.serotonin_append_test_event(jsonb) to authenticated;
 commit;
 
--- ADMIN STEP (run separately, with your own long random code; never commit or share this SQL with the code in it):
---   insert into public.serotonin_test_secret(id, code_hash)
---   values (1, encode(sha256(convert_to('여기에-16자-이상-접속-코드', 'UTF8')), 'hex'))
---   on conflict (id) do update set code_hash = excluded.code_hash;
--- Until a code is set, nobody can join. Changing the code does not remove accounts that already joined.
+-- ADMIN: create a department (run separately; node scripts/new-dept.mjs prints this with a generated code's hash,
+-- so the code itself never has to be typed into SQL):
+--   insert into public.serotonin_depts(id, name, rotating, code_hash)
+--   values ('dept2', '2부서', true, '<sha256 hex of the access code>');
+-- Rename:            update public.serotonin_depts set name = '구급대' where id = 'dept1';
+-- Office (no shifts): update public.serotonin_depts set rotating = false where id = 'dept2';
+-- Who joined where:  select d.name, m.name as person, m.joined_at from public.serotonin_test_members m join public.serotonin_depts d on d.id = m.dept order by 1, 3;
+-- Same person in two departments (by typed name): select name, count(distinct dept) from public.serotonin_test_members where name is not null group by name having count(distinct dept) > 1;
+-- Remove an account from its department (it can then join another): delete from public.serotonin_test_members where user_id = '<uuid>';

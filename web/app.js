@@ -9,10 +9,16 @@
   const SCHEDULE = core.SCHEDULE_CATEGORY;
   const HANDOVER = core.HANDOVER_CATEGORY;
   const MEMO_CATEGORIES = core.MEMO_CATEGORIES;
+  // Department (Supabase backend): rotating = 24h shifts with the day changing at 09:00; office departments use plain dates.
+  let rotating = true,
+    deptName = '';
+  function todayKey() {
+    return rotating ? core.dutyDay(Date.now()) : core.koreanDay(Date.now());
+  }
   const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
   const MAX_VISIBLE_CHIPS = 3;
-  let calendarMonth = monthOf(core.dutyDay(Date.now())),
-    selectedDay = core.dutyDay(Date.now()),
+  let calendarMonth = monthOf(todayKey()),
+    selectedDay = todayKey(),
     lastToday = selectedDay,
     handoverDay = selectedDay,
     handoverBusy = false;
@@ -110,6 +116,7 @@
         if (signing) await loadRegistry();
         notes = updated;
         events = next;
+        applyDept(storage.dept);
         synced = true;
         $('connection-notice').hidden = true;
         $('connection-status').textContent = storageLabel + (writeConnected ? ' 공유 저장 연결됨' : ' 공유 자료 연결됨');
@@ -150,6 +157,22 @@
     } finally {
       syncing = null;
     }
+  }
+  function applyDept(info) {
+    if (!info) return;
+    const next = info.rotating !== false,
+      name = info.name || '';
+    const changed = next !== rotating || name !== deptName;
+    rotating = next;
+    deptName = name;
+    if (!changed) return;
+    // The day is counted differently now, so every "today" is recomputed.
+    lastToday = todayKey();
+    selectedDay = lastToday;
+    handoverDay = lastToday;
+    calendarMonth = monthOf(lastToday);
+    document.querySelector('.workspace small').textContent = (deptName ? deptName + ' · ' : '') + (cloud ? 'Supabase' : '공유기 게스트');
+    renderDuty();
   }
   function updateProfile() {
     $('avatar').textContent = author ? author.slice(0, 1) : '?';
@@ -249,7 +272,7 @@
     $('stat-open').textContent = active.filter(n => n.status !== 'done').length;
     $('stat-done').textContent = active.filter(n => n.status === 'done').length;
     $('stat-pinned').textContent = active.filter(n => n.pinned).length;
-    const pending = core.handoverOn(notes, core.dutyDay(Date.now())).filter(item => !item.done).length;
+    const pending = core.handoverOn(notes, todayKey(), rotating).filter(item => !item.done).length;
     $('nav-handover').textContent = pending;
     $('nav-handover').hidden = !pending;
     if (view === 'handover') {
@@ -763,12 +786,12 @@
     return li;
   }
   function renderHandover() {
-    const today = core.dutyDay(Date.now());
+    const today = todayKey();
     if (handoverDay > today) handoverDay = today;
     const day = handoverDay,
       isToday = day === today,
       editable = isToday,
-      items = core.handoverOn(notes, day),
+      items = core.handoverOn(notes, day, rotating),
       open = items.filter(item => !item.done),
       done = items.filter(item => item.done);
     $('ho-title').textContent = dayLabel(day, true) + (isToday ? ' · 오늘' : '');
@@ -777,15 +800,12 @@
     $('ho-next').disabled = isToday;
     $('ho-prev').disabled = day <= '2000-01-01';
     const carried = open.filter(item => item.carriedDays > 0).length;
+    const carriedText = carried ? ' · 어제까지 끝나지 않은 ' + carried + '건을 가져왔습니다' : '';
     $('ho-sub').textContent = isToday
-      ? core.teamOn(day) +
-        '팀 근무일 · ' +
-        dayLabel(day) +
-        ' 09:00 ~ ' +
-        dayLabel(core.addDays(day, 1)) +
-        ' 09:00' +
-        (carried ? ' · 어제까지 끝나지 않은 ' + carried + '건을 가져왔습니다' : '')
-      : '지난 근무일의 기록입니다 (읽기 전용). 그날 체크한 상태 그대로 보여 줍니다.';
+      ? rotating
+        ? core.teamOn(day) + '팀 근무일 · ' + dayLabel(day) + ' 09:00 ~ ' + dayLabel(core.addDays(day, 1)) + ' 09:00' + carriedText
+        : dayLabel(day) + (carriedText ? carriedText : '')
+      : '지난 날짜의 기록입니다 (읽기 전용). 그날 체크한 상태 그대로 보여 줍니다.';
     const percent = items.length ? Math.round((done.length / items.length) * 100) : 0;
     $('ho-bar-fill').style.width = percent + '%';
     $('ho-bar').setAttribute('aria-valuenow', String(percent));
@@ -805,7 +825,7 @@
     const days = el('div', 'ho-day-list');
     for (let back = 0; back < 14; back++) {
       const d = core.addDays(today, -back),
-        list = core.handoverOn(notes, d),
+        list = core.handoverOn(notes, d, rotating),
         finished = list.filter(item => item.done).length;
       const chip = el('button', 'ho-day' + (d === day ? ' active' : '') + (list.length ? '' : ' empty'));
       chip.type = 'button';
@@ -824,20 +844,19 @@
   }
   function moveHandoverDay(delta) {
     const next = core.addDays(handoverDay, delta);
-    if (next > core.dutyDay(Date.now()) || next < '2000-01-01') return;
+    if (next > todayKey() || next < '2000-01-01') return;
     handoverDay = next;
     renderHandover();
   }
   $('ho-prev').onclick = () => moveHandoverDay(-1);
   $('ho-next').onclick = () => moveHandoverDay(1);
   $('ho-today').onclick = () => {
-    handoverDay = core.dutyDay(Date.now());
+    handoverDay = todayKey();
     renderHandover();
   };
   $('ho-date').onchange = event => {
     const value = event.target.value;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value) && value >= '2000-01-01')
-      handoverDay = value > core.dutyDay(Date.now()) ? core.dutyDay(Date.now()) : value;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value) && value >= '2000-01-01') handoverDay = value > todayKey() ? todayKey() : value;
     renderHandover();
   };
   $('ho-add').onsubmit = event => {
@@ -857,7 +876,7 @@
     openEditor(undefined, { handover: true, title });
   };
   $('ho-copy').onclick = () => {
-    const items = core.handoverOn(notes, handoverDay),
+    const items = core.handoverOn(notes, handoverDay, rotating),
       line = item =>
         (item.done ? '☑ ' : '☐ ') +
         item.note.title +
@@ -866,7 +885,7 @@
     const open = items.filter(item => !item.done),
       done = items.filter(item => item.done);
     const text = [
-      '[인수인계] ' + dayLabel(handoverDay, true) + ' ' + core.teamOn(handoverDay) + '팀 근무',
+      '[인수인계] ' + dayLabel(handoverDay, true) + (rotating ? ' ' + core.teamOn(handoverDay) + '팀 근무' : ''),
       '',
       '■ 해야 할 일 (' + open.length + ')',
       ...(open.length ? open.map(line) : ['없음']),
@@ -921,7 +940,7 @@
     calendarMonth = { year, month };
     const prefix = String(year).padStart(4, '0') + '-' + String(month).padStart(2, '0');
     if (!selectedDay.startsWith(prefix)) {
-      const today = core.dutyDay(Date.now());
+      const today = todayKey();
       selectedDay = today.startsWith(prefix) ? today : prefix + '-01';
     }
     renderCalendar();
@@ -943,6 +962,8 @@
     openEditor(note.id);
   }
   function renderDuty() {
+    $('duty-badge').hidden = !rotating;
+    if (!rotating) return;
     const day = core.dutyDay(Date.now()),
       team = core.teamOn(day);
     $('duty-badge').textContent = '근무 ' + team + '팀';
@@ -951,7 +972,7 @@
   function renderCalendar() {
     const { year, month } = calendarMonth,
       prefix = String(year).padStart(4, '0') + '-' + String(month).padStart(2, '0'),
-      today = core.dutyDay(Date.now());
+      today = todayKey();
     $('cal-title').textContent = year + '년 ' + month + '월';
     $('cal-month').value = prefix;
     $('cal-prev').disabled = year === 2000 && month === 1;
@@ -978,10 +999,13 @@
         const number = el('button', 'cal-date', String(Number(day.slice(8))));
         number.setAttribute(
           'aria-label',
-          dayLabel(day, true) + ' ' + core.teamOn(day) + '팀 근무' + (events.length ? ' · 일정 ' + events.length + '개' : ''),
+          dayLabel(day, true) +
+            (rotating ? ' ' + core.teamOn(day) + '팀 근무' : '') +
+            (events.length ? ' · 일정 ' + events.length + '개' : ''),
         );
         number.setAttribute('aria-pressed', String(day === selectedDay));
-        head.append(number, teamBadge(day));
+        head.append(number);
+        if (rotating) head.append(teamBadge(day));
         cell.append(head);
         const chips = el('div', 'cal-chips');
         for (const note of events.slice(0, MAX_VISIBLE_CHIPS)) {
@@ -1015,10 +1039,8 @@
       hour = String(core.SHIFT_START_HOUR).padStart(2, '0') + ':00';
     const head = el('div', 'day-panel-head');
     const title = el('div');
-    title.append(
-      el('h3', '', dayLabel(day, true)),
-      el('p', '', core.teamOn(day) + '팀 근무 · ' + hour + ' ~ ' + dayLabel(core.addDays(day, 1)) + ' ' + hour),
-    );
+    title.append(el('h3', '', dayLabel(day, true)));
+    if (rotating) title.append(el('p', '', core.teamOn(day) + '팀 근무 · ' + hour + ' ~ ' + dayLabel(core.addDays(day, 1)) + ' ' + hour));
     const add = el('button', 'secondary');
     add.append(icon('plus'), document.createTextNode('이 날 일정 추가'));
     add.onclick = () => openEditor(undefined, { schedule: true, date: day });
@@ -1068,7 +1090,7 @@
   $('cal-prev').onclick = () => shiftMonth(-1);
   $('cal-next').onclick = () => shiftMonth(1);
   $('cal-today').onclick = () => {
-    selectedDay = core.dutyDay(Date.now());
+    selectedDay = todayKey();
     calendarMonth = monthOf(selectedDay);
     renderCalendar();
   };
@@ -1137,7 +1159,8 @@
         $('router-origin').value = routerOrigin;
         setSetting('routerOrigin', routerOrigin);
       }
-      identity = await storage.connect({ code: cloud ? $('supabase-code').value.trim() : '' });
+      identity = await storage.connect({ code: cloud ? $('supabase-code').value.trim() : '', name });
+      applyDept(identity.dept);
       if (signing) {
         ensureSigner();
         updateSigningUi();
@@ -1149,9 +1172,12 @@
       updateProfile();
       await refresh();
       $('supabase-code').value = '';
+      const typedCode = cloud && identity.already;
       showMessage(
         'settings-result',
-        '연결했습니다. 메모는 ' +
+        (deptName ? '[' + deptName + '] ' : '') +
+          (typedCode ? '이 브라우저는 이미 이 부서에 등록되어 있어 코드는 다시 쓰지 않았습니다. ' : '') +
+          '연결했습니다. 메모는 ' +
           storageLabel +
           '에서 공유됩니다.' +
           (identity.id
@@ -1267,7 +1293,7 @@
       weekday: 'short',
     }).format(new Date());
     renderDuty();
-    const today = core.dutyDay(Date.now());
+    const today = todayKey();
     if (today !== lastToday) {
       // The shift changed at 09:00: a handover list that was showing "today" rolls over to the new shift day.
       if (handoverDay === lastToday) handoverDay = today;

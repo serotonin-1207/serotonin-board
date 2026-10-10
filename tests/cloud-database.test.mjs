@@ -7,8 +7,8 @@ let db;
 const a='11111111-1111-1111-1111-111111111111',b='22222222-2222-2222-2222-222222222222';
 const id=n=>n.toString(16).padStart(32,'0');
 const make=(n,noteId=n,parents=[])=>({schema:1,id:id(n),noteId:id(noteId),parents:parents.map(id),at:'2000-01-01T00:00:00Z',actor:{id:b,kind:'account'},note:{title:'DB 시험',content:'내용',author:'표시 이름',category:'업무 메모',status:'todo',pinned:false,deleted:false}});
-const CODE='test-access-code-0000';
-async function actor(user=a,anonymous=true,member=true){await db.exec('reset role;');if(member&&user)await db.query('insert into public.serotonin_test_members(user_id) values($1) on conflict do nothing',[user]);await db.query("select set_config('request.test.user',$1,false),set_config('request.test.jwt',$2,false)",[user,JSON.stringify({is_anonymous:anonymous})]);await db.exec('set role authenticated;');}
+const CODE='test-access-code-0000',CODE2='second-dept-code-1111';
+async function actor(user=a,anonymous=true,member=true,dept='d1'){await db.exec('reset role;');if(member&&user)await db.query('insert into public.serotonin_test_members(user_id,dept) values($1,$2) on conflict do nothing',[user,dept]);await db.query("select set_config('request.test.user',$1,false),set_config('request.test.jwt',$2,false)",[user,JSON.stringify({is_anonymous:anonymous})]);await db.exec('set role authenticated;');}
 async function append(event){return (await db.query('select public.serotonin_append_test_event($1::jsonb) as event',[JSON.stringify(event)])).rows[0].event;}
 before(async()=>{
  db=new PGlite();
@@ -17,7 +17,7 @@ before(async()=>{
  create function auth.jwt() returns jsonb language sql stable as $$select coalesce(nullif(current_setting('request.test.jwt',true),''),'{}')::jsonb$$;
  grant usage on schema public,auth to anon,authenticated;`);
  await db.exec(await fs.readFile('supabase/setup.sql','utf8'));
- await db.query("insert into public.serotonin_test_secret(id,code_hash) values(1,encode(sha256(convert_to($1,'UTF8')),'hex'))",[CODE]);
+ await db.query("insert into public.serotonin_depts(id,name,rotating,code_hash) values('d1','1부서',true,encode(sha256(convert_to($1,'UTF8')),'hex')),('d2','내근',false,encode(sha256(convert_to($2,'UTF8')),'hex'))",[CODE,CODE2]);
  await actor();
 });
 after(async()=>{await db?.close();});
@@ -76,13 +76,13 @@ test('accounts that never presented the access code can neither read nor write',
  assert.equal((await db.query('select count(*)::int as n from public.serotonin_test_events')).rows[0].n,0);
  await assert.rejects(append(make(300)),/Access code required/);
  assert.equal((await db.query('select public.serotonin_test_connection() as c')).rows[0].c.member,false);
- for(const sql of ['select * from public.serotonin_test_members','select * from public.serotonin_test_secret','select * from public.serotonin_test_join_failures'])await assert.rejects(db.exec(sql),/permission denied/);
+ for(const sql of ['select * from public.serotonin_test_members','select * from public.serotonin_depts','select * from public.serotonin_test_join_failures'])await assert.rejects(db.exec(sql),/permission denied/);
  await actor();
 });
 test('the access code admits an account once; wrong codes are refused and locked after five misses',async()=>{
  const join=async code=>(await db.query('select public.serotonin_join_test_board($1) as r',[code])).rows[0].r;
  const good='55555555-5555-5555-5555-555555555555',bad='66666666-6666-6666-6666-666666666666';
- await actor(good,true,false);assert.deepEqual(await join(CODE),{member:true});
+ await actor(good,true,false);assert.deepEqual(await join(CODE),{member:true,dept:{id:'d1',name:'1부서',rotating:true}});
  assert.equal((await db.query('select public.serotonin_test_connection() as c')).rows[0].c.member,true);
  assert.equal((await append(make(301))).actor.id,good);
  await actor(bad,true,false);
@@ -90,4 +90,31 @@ test('the access code admits an account once; wrong codes are refused and locked
  assert.deepEqual(await join(CODE),{member:false,error:'locked'});
  assert.equal((await db.query('select public.serotonin_test_connection() as c')).rows[0].c.member,false);
  await actor();
+});
+test('each department sees only its own revisions and cannot touch another department\'s notes',async()=>{
+ const d1=a, d2='77777777-7777-7777-7777-777777777777';
+ await actor(d1);const first=await append(make(400));
+ await actor(d2,true,true,'d2');
+ assert.equal((await db.query('select count(*)::int as n from public.serotonin_test_events')).rows[0].n,0);   // nothing of d1 is visible
+ const mine=await append(make(401));assert.equal(mine.actor.id,d2);
+ assert.deepEqual((await db.query('select count(*)::int as n from public.serotonin_test_events')).rows[0],{n:1});
+ await assert.rejects(append(make(402,400,[400])),/Parent revision/);                       // cannot extend d1's note
+ await assert.rejects(append(make(400,403)),/already used/);                                 // cannot reuse d1's revision id
+ await assert.rejects(append(make(404,400,[])),/requires a parent/);                          // cannot start a second root for d1's note
+ await actor(d1);
+ const seen=(await db.query('select id from public.serotonin_test_events')).rows.map(r=>r.id);
+ assert.ok(seen.includes(first.id)&&!seen.includes(mine.id));                                 // and d1 does not see d2's
+ await actor();
+});
+test('an account joins one department only; the other department\'s code does not move it',async()=>{
+ const join=async(code,name)=>(await db.query('select public.serotonin_join_test_board($1,$2) as r',[code,name])).rows[0].r;
+ const u='88888888-8888-8888-8888-888888888888';
+ await actor(u,true,false);
+ assert.equal((await join(CODE2,'홍길동')).dept.id,'d2');
+ assert.equal((await join(CODE,'홍길동')).already,true);                                      // already in d2, stays there
+ assert.equal((await db.query('select public.serotonin_dept_info() as d')).rows[0].d.id,'d2');
+ assert.equal((await db.query('select public.serotonin_dept_info() as d')).rows[0].d.rotating,false);
+ await db.exec('reset role;');
+ const rows=(await db.query("select dept,name from public.serotonin_test_members where user_id=$1",[u])).rows;
+ assert.deepEqual(rows,[{dept:'d2',name:'홍길동'}]);
 });
