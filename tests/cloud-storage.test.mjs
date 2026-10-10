@@ -48,6 +48,21 @@ test('after the first full read only newer rows are fetched, with an overlap, an
   assert.ok(Date.parse(calls[1]) <= Date.parse('2026-10-09T10:05:00Z') && Date.parse(calls[1]) >= Date.parse('2026-10-09T10:02:30Z')); // 2 min before the newest row seen
   const third = await storage.list(new Map(second.map(e => [e.id, e])));
   assert.equal(third.length, 3); // overlap re-reads rows without duplicating them
-  for (let i = 0; i < 2000; i++) await storage.list(new Map(third.map(e => [e.id, e])));
-  assert.ok(calls.filter(c => c === null).length >= 2); // safety-net full re-read happened again
+  const fullBefore = calls.filter(c => c === null).length;
+  storage.fullAt = Date.now() - 8 * 24 * 3600 * 1000; // a week-old full read triggers the safety-net full re-read
+  await storage.list(new Map(third.map(e => [e.id, e])));
+  assert.equal(calls.filter(c => c === null).length, fullBefore + 1);
+  // the browser cache resumes where the last page open stopped
+  const saved = storage.exportState();
+  const fresh = new SupabaseStorage({ maxEvents: 20000 }, {});
+  fresh.session = storage.session; fresh.dept = storage.dept; fresh.client = storage.client;
+  fresh.importState(saved);
+  const before = calls.length;
+  await fresh.list(new Map(third.map(e => [e.id, e])));
+  assert.ok(calls[before]); // incremental, not a full read
+  fresh.importState({ mark: 'x', fullAt: 'y' }); // invalid state is ignored
+  assert.equal(fresh.exportState().mark, saved.mark);
+  fresh.forceFull();
+  await fresh.list(new Map(third.map(e => [e.id, e])));
+  assert.equal(calls[calls.length - 1], null); // forced full read
 });

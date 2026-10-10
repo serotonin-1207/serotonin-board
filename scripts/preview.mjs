@@ -12,7 +12,7 @@ const server = http.createServer(async (req,res) => {
   try {
     const pathname = decodeURIComponent(new URL(req.url,'http://localhost').pathname);
     if (pathname === '/deploy-manifest') {
-      const assets=['index.html','style.css','core.js','config.js','app.js','storage.js','favicon.svg'];
+      const assets=['index.html','style.css','core.js','export.js','config.js','app.js','storage.js','favicon.svg'];
       const names = trials ? ['index.html',...['guest','supabase'].flatMap(folder=>assets.map(name=>folder+'/'+name)),'supabase/setup.sql'] : [...assets];
       const files = await Promise.all(names.map(async name=>({name,content:await fs.readFile(path.join(root,name),'utf8')})));
       res.setHeader('Content-Type',mime['.json']); return res.end(JSON.stringify(files));

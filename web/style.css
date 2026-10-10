@@ -135,3 +135,11 @@ button.armed svg{color:#fff}
 .ho-day.active{border-color:#e59a83;background:#fffaf6;box-shadow:inset 0 0 0 1px #e59a83}
 @media(max-width:900px){.ho-columns{grid-template-columns:1fr}}
 @media(max-width:680px){.ho-add{flex-wrap:wrap}.ho-add input{flex-basis:100%}.ho-add .primary{flex:1}.handover-head .calendar-nav h2{min-width:0;font-size:16px}.ho-item{padding:12px}.ho-title{font-size:14px}}
+/* ===== 기록 내려받기 ===== */
+.footer-actions{display:flex;gap:16px;align-items:center}
+.export-list{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.export-item{text-align:left;border:1px solid var(--line);background:#fff;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.export-item:hover{background:#fafbf6;border-color:#d7dccb}
+.export-item strong{font-size:14px;font-weight:650}
+.export-item em{font-style:normal;font-size:11px;font-weight:600;color:#66775a;background:#eef2e8;border-radius:5px;padding:2px 7px;margin-left:6px}
+.export-item span{font-size:12px;color:#6e7964;line-height:1.7}

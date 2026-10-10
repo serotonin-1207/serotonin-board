@@ -11,6 +11,7 @@
   <script src="config.js?v=0.1.1" defer></script>
   <script src="core.js?v=0.1.1" defer></script>
   <script src="storage.js?v=0.2.0" defer></script>
+  <script src="export.js?v=0.1.1" defer></script>
   <script src="app.js?v=0.1.1" defer></script>
 </head>
 <body>
@@ -111,7 +112,7 @@
         <div class="board-grid" id="note-grid" aria-live="polite"></div>
         <div class="empty-state" id="empty-state" hidden><div class="empty-art"><svg><use href="#i-note"/></svg><span>+</span></div><h3 id="empty-title">첫 번째 기록을 남겨 보세요.</h3><p id="empty-description">새 메모를 작성하면 같은 보드에 접속한 동료도 볼 수 있어요.</p><button class="secondary" id="empty-new">첫 메모 작성<svg><use href="#i-arrow"/></svg></button></div>
       </section>
-      <footer><span><span class="footer-dot"></span>기록은 공유기에 연결된 SSD에 보관합니다.</span><button class="text-button" id="settings-button">연결 설정</button></footer>
+      <footer><span><span class="footer-dot"></span>기록은 공유기에 연결된 SSD에 보관합니다.</span><span class="footer-actions"><button class="text-button" id="export-open">기록 내려받기</button><button class="text-button" id="settings-button">연결 설정</button></span></footer>
     </div>
   </main>
 </div>
@@ -146,7 +147,18 @@
   </div>
   <p class="form-message" id="settings-result" role="status" hidden></p>
   <div class="pilot-notice"><strong>현재는 내부망 시험용입니다.</strong><p>표시 이름은 본인 인증이 아닙니다. 자체 회원가입과 계정별 권한은 아직 구현되지 않았습니다. 현재 URL 서비스에는 열람 인증이 꺼져 있으므로 민감한 업무자료를 입력하지 마세요.</p></div>
-  <div class="settings-links"><a href="../index.html" id="comparison-link" hidden>두 버전 비교</a><button class="text-button" id="export-backup">메모 백업 내려받기</button></div>
+  <div class="settings-links"><a href="../index.html" id="comparison-link" hidden>두 버전 비교</a><button class="text-button" id="export-backup">기록 내려받기</button><button class="text-button" id="cache-clear">이 기기에 저장된 기록 지우기</button><button class="text-button" id="cache-refull">서버에서 전부 다시 받기</button></div>
+</dialog>
+<dialog id="export-dialog" class="settings-dialog">
+  <div class="dialog-heading"><div><p class="eyebrow">DOWNLOAD</p><h2>기록 내려받기</h2></div><button class="close-button" id="export-close" aria-label="닫기">×</button></div>
+  <p class="settings-intro">지금까지 저장된 <strong>모든 기록</strong>을 파일로 받습니다. 엑셀로 열어 볼 때는 CSV, 보관과 옮기기에는 JSON을 권합니다.</p>
+  <div class="export-list">
+    <button class="export-item" data-export="logbook"><strong>인수인계 일지 <em>CSV · 엑셀</em></strong><span>근무일마다 그날의 목록을 그대로 담습니다. 완료 여부와 이월 일수가 날짜별로 남습니다.</span></button>
+    <button class="export-item" data-export="items"><strong>항목 목록 <em>CSV · 엑셀</em></strong><span>모든 항목의 현재 상태, 쓴 사람, 완료한 사람과 시각.</span></button>
+    <button class="export-item" data-export="revisions"><strong>수정 이력 전체 <em>CSV · 엑셀</em></strong><span>저장된 모든 기록을 시간순으로. 누가 언제 무엇을 바꿨는지 확인합니다.</span></button>
+    <button class="export-item" data-export="backup"><strong>전체 백업 <em>JSON</em></strong><span>모든 기록을 원형 그대로. 보관용이며 다른 도구로 옮길 때 씁니다.</span></button>
+  </div>
+  <p class="form-message" id="export-message" role="status" hidden></p>
 </dialog>
 <dialog id="history-dialog" class="history-dialog"><div class="dialog-heading"><div><p class="eyebrow">NOTE HISTORY</p><h2>수정 기록</h2></div><button class="close-button" id="history-close" aria-label="닫기">×</button></div><p class="history-intro" id="history-intro"></p><div id="history-list"></div></dialog>
 <div id="toast" class="toast" role="status" hidden></div>

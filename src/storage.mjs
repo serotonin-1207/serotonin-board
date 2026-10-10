@@ -1,10 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import * as signing from './signing.mjs';
+import * as cache from './cache.mjs';
 
 const { canonical } = signing;
 const PAGE_SIZE = 500,
   OVERLAP_MS = 120000,
-  FULL_RELOAD_EVERY = 2000; // about 8 hours of polling; the overlap window already covers late-committing rows
+  FULL_RELOAD_AFTER_MS = 7 * 24 * 3600 * 1000; // a safety net for rows an administrator removed on the server
 
 export function publicSupabaseConfig(url, key) {
   let parsed;
@@ -183,6 +184,20 @@ export class SupabaseStorage {
       this.connecting = null;
     }
   }
+  // Where the incremental read stopped; saved with the browser cache so the next page open continues from there.
+  exportState() {
+    return { mark: this.mark || 0, fullAt: this.fullAt || 0 };
+  }
+  importState(state) {
+    if (state && Number.isFinite(state.mark) && Number.isFinite(state.fullAt)) {
+      this.mark = state.mark;
+      this.fullAt = state.fullAt;
+    }
+  }
+  forceFull() {
+    this.mark = 0;
+    this.fullAt = 0;
+  }
   async checkMembership(user) {
     const result = await this.client.rpc('serotonin_test_connection');
     if (result.error) throw new Error('테스트 저장소 연결 실패: ' + result.error.message + ' · setup.sql 실행 여부를 확인해 주세요.');
@@ -210,12 +225,16 @@ export class SupabaseStorage {
     return { id: user.id, kind: user.is_anonymous ? 'anonymous' : 'account', dept: this.dept, already };
   }
   // Revisions never change, so after a full first read only rows saved since the last read are fetched. The window overlaps by two
-  // minutes (a transaction can commit slightly out of saved_at order) and every 20th read is a full re-read as a safety net.
+  // minutes (a transaction can commit slightly out of saved_at order) and a full re-read happens weekly (or on request) as a safety net.
   async list(previous = new Map()) {
     const user = await this.session();
     if (!this.dept) await this.checkMembership(user);
-    this.reads = (this.reads || 0) + 1;
-    const full = !previous.size || !this.mark || this.reads % FULL_RELOAD_EVERY === 0;
+    if (!this.dept) {
+      const error = new Error('접속 코드 등록이 필요합니다. 연결 설정에서 부서 관리자에게 받은 접속 코드를 입력해 주세요.');
+      error.code = 'NOT_MEMBER';
+      throw error;
+    }
+    const full = !previous.size || !this.mark || Date.now() - (this.fullAt || 0) > FULL_RELOAD_AFTER_MS;
     const merged = full ? new Map() : new Map(previous);
     const since = full ? null : new Date(this.mark - OVERLAP_MS).toISOString();
     let newest = full ? 0 : this.mark;
@@ -240,6 +259,7 @@ export class SupabaseStorage {
       if (result.data.length < PAGE_SIZE) break;
     }
     this.mark = newest || this.mark;
+    if (full) this.fullAt = Date.now();
     return [...merged.values()];
   }
   async append(event) {
@@ -266,4 +286,5 @@ if (typeof window !== 'undefined') {
     cfg.backend === 'supabase' ? new SupabaseStorage(cfg, options) : new RouterStorage(cfg, options);
   window.validateSupabaseConfig = publicSupabaseConfig;
   window.BoardSigning = signing;
+  window.BoardCache = cache;
 }

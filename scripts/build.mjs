@@ -8,7 +8,7 @@ const supabasePublic = JSON.parse(await fs.readFile('supabase/public-config.json
 const output = path.resolve('dist');
 await fs.mkdir(output, { recursive: true });
 await build({ entryPoints: ['src/storage.mjs'], bundle: true, format: 'iife', target: ['chrome100', 'safari16'], outfile: 'web/storage.js', minify: true, legalComments: 'eof' });
-const assets = ['index.html', 'app.js', 'core.js', 'style.css', 'storage.js', 'favicon.svg'];
+const assets = ['index.html', 'app.js', 'core.js', 'export.js', 'style.css', 'storage.js', 'favicon.svg'];
 for (const backend of ['guest', 'supabase']) {
   const folder = path.join(output, backend);
   await fs.mkdir(folder, { recursive: true });

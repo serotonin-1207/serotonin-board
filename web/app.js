@@ -118,6 +118,7 @@
         events = next;
         applyDept(storage.dept);
         synced = true;
+        scheduleCacheSave();
         $('connection-notice').hidden = true;
         $('connection-status').textContent = storageLabel + (writeConnected ? ' 공유 저장 연결됨' : ' 공유 자료 연결됨');
         $('sidebar-storage').replaceChildren(
@@ -138,6 +139,12 @@
           ' · 15초마다 갱신';
         render();
       } catch (error) {
+        if (error.code === 'NOT_MEMBER') {
+          events = new Map();
+          notes = [];
+          const key = cacheKey();
+          if (key && window.BoardCache) window.BoardCache.remove(key);
+        }
         synced = false;
         $('connection-status').textContent = '공유 자료 연결 확인 필요';
         $('status-dot').className = 'status-dot error-dot';
@@ -1241,23 +1248,134 @@
       showMessage('settings-result', error.message);
     }
   };
-  $('export-backup').onclick = async () => {
+  // ===== 이 기기에 기록 저장 (브라우저 캐시) =====
+  // Revisions never change, so what was received once is kept in this browser and only newer rows are fetched next time.
+  let cacheTimer,
+    cacheSaved = -1;
+  function cacheKey() {
     try {
-      await refresh();
-      const blob = new Blob([JSON.stringify({ schema: 1, exportedAt: new Date().toISOString(), events: [...events.values()] }, null, 2)], {
-        type: 'application/json',
+      if (cloud) return cloudUrl ? 'supabase|' + new URL(cloudUrl).hostname : '';
+      return 'router|' + cfg.storagePath + '|' + location.origin;
+    } catch {
+      return '';
+    }
+  }
+  // The temporary account the browser is signed in with: a cache is only reused by the account that created it.
+  function currentUserId() {
+    if (!cloud) return 'router';
+    try {
+      return JSON.parse(localStorage.getItem('serotonin-cloud-' + new URL(cloudUrl).hostname) || '{}')?.user?.id || '';
+    } catch {
+      return '';
+    }
+  }
+  async function restoreCache() {
+    const key = cacheKey();
+    if (!key || !window.BoardCache) return;
+    const saved = await window.BoardCache.load(key);
+    const userId = currentUserId();
+    if (!saved) return;
+    if (saved.v !== 1 || !userId || saved.userId !== userId || !Array.isArray(saved.events)) {
+      await window.BoardCache.remove(key); // another account used this browser before: never show its data
+      return;
+    }
+    try {
+      if (!saved.events.every(core.validEvent)) throw new Error('invalid');
+      const restored = new Map(saved.events.map(e => [e.id, e]));
+      notes = core.buildNotes([...restored.values()]);
+      events = restored;
+    } catch {
+      events = new Map();
+      notes = [];
+      await window.BoardCache.remove(key);
+      return;
+    }
+    storage.importState?.(saved.state);
+    applyDept(saved.dept);
+    cacheSaved = events.size;
+    $('last-sync').textContent = '이 기기에 저장된 기록을 먼저 보여 주고 새 내용을 확인하는 중입니다…';
+    render();
+  }
+  function scheduleCacheSave() {
+    const key = cacheKey();
+    if (!key || !window.BoardCache || events.size === cacheSaved) return;
+    clearTimeout(cacheTimer);
+    cacheTimer = setTimeout(async () => {
+      const userId = currentUserId();
+      if (!userId) return;
+      const ok = await window.BoardCache.save(key, {
+        v: 1,
+        userId,
+        dept: storage.dept || null,
+        savedAt: Date.now(),
+        state: storage.exportState?.() || null,
+        events: [...events.values()],
       });
-      const url = URL.createObjectURL(blob);
-      const a = el('a');
-      a.href = url;
-      a.download = 'serotonin-board-' + core.koreanDay(Date.now()) + '.json';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-      toast('메모 수정 기록을 포함한 백업 파일을 내려받았습니다.');
+      if (ok) cacheSaved = events.size;
+    }, 1500);
+  }
+  $('cache-clear').onclick = async () => {
+    const key = cacheKey();
+    if (key && window.BoardCache) await window.BoardCache.remove(key);
+    cacheSaved = -1;
+    showMessage('settings-result', '이 기기에 저장된 기록을 지웠습니다. 서버의 기록은 그대로입니다.', true);
+  };
+  $('cache-refull').onclick = async () => {
+    const button = $('cache-refull');
+    button.disabled = true;
+    try {
+      storage.forceFull?.();
+      events = new Map();
+      cacheSaved = -1;
+      await refresh();
+      showMessage('settings-result', '서버에서 모든 기록을 다시 받았습니다 (' + events.size + '건).', true);
     } catch (error) {
-      toast(error.message);
+      showMessage('settings-result', error.message);
+    } finally {
+      button.disabled = false;
     }
   };
+
+  // ===== 기록 내려받기 =====
+  function download(name, text, type) {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = el('a');
+    a.href = url;
+    a.download = name;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+  async function exportKind(kind) {
+    const ex = window.BoardExport;
+    $('export-message').hidden = true;
+    try {
+      await refresh();
+    } catch {
+      /* Export what is already loaded when the server cannot be reached. */
+    }
+    if (!events.size) return showMessage('export-message', '내려받을 기록이 아직 없습니다.');
+    const base = 'serotonin-' + (deptName.replace(/[\\/:*?"<>|\s]+/g, '-') || 'board') + '-' + todayKey() + '-';
+    const csv = 'text/csv;charset=utf-8';
+    if (kind === 'logbook') download(base + '인수인계일지.csv', ex.logbookCsv(core, notes, todayKey(), rotating, core.teamOn), csv);
+    else if (kind === 'items') download(base + '항목목록.csv', ex.itemsCsv(notes), csv);
+    else if (kind === 'revisions') download(base + '수정이력.csv', ex.revisionsCsv(events.values()), csv);
+    else
+      download(
+        base + '백업.json',
+        ex.backupJson(events.values(), { version: cfg.version, department: { name: deptName || null, rotating } }),
+        'application/json',
+      );
+    showMessage('export-message', '파일을 내려받았습니다 (기록 ' + events.size + '건).', true);
+  }
+  document.querySelectorAll('[data-export]').forEach(b => (b.onclick = () => exportKind(b.dataset.export)));
+  $('export-open').onclick = $('export-backup').onclick = () => {
+    $('export-message').hidden = true;
+    if ($('settings-dialog').open) $('settings-dialog').close();
+    $('export-dialog').showModal();
+  };
+  $('export-close').onclick = () => $('export-dialog').close();
   function applyMode() {
     document.querySelectorAll('[data-router]').forEach(n => (n.hidden = cloud));
     document.querySelectorAll('[data-cloud]').forEach(n => (n.hidden = !cloud));
@@ -1304,12 +1422,18 @@
   dateLabel();
   setInterval(dateLabel, 60000);
   updateProfile();
-  refresh().catch(() => {});
+  restoreCache()
+    .catch(() => {})
+    .then(() => refresh().catch(() => {}));
   setInterval(() => {
     if (!document.hidden && !saving) refresh().catch(() => {});
   }, cfg.pollMilliseconds);
+  // Coming back to the tab refreshes at once, but never more often than every 5 seconds (tab switching must not flood the server).
+  let lastVisibleRefresh = 0;
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && !saving) refresh().catch(() => {});
+    if (document.hidden || saving || Date.now() - lastVisibleRefresh < 5000) return;
+    lastVisibleRefresh = Date.now();
+    refresh().catch(() => {});
   });
   window.addEventListener('beforeunload', event => {
     if ($('editor-dialog').open) {
