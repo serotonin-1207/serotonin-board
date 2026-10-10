@@ -615,11 +615,13 @@
         const header = el('header');
         header.append(el('span', '', event.note.author), el('time', '', absoluteTime(event.at)));
         const actorLabel = event.actor
-          ? (event.actor.kind === 'display-only'
-              ? '브라우저 표식 · 이름 미인증'
-              : event.actor.kind === 'anonymous'
-                ? '임시 계정 · 이름 미인증'
-                : '인증 계정 · 등록 이름 확인 필요') +
+          ? (event.actor.kind === 'restored'
+              ? '백업에서 복원됨 · 복원한 계정'
+              : event.actor.kind === 'display-only'
+                ? '브라우저 표식 · 이름 미인증'
+                : event.actor.kind === 'anonymous'
+                  ? '임시 계정 · 이름 미인증'
+                  : '인증 계정 · 등록 이름 확인 필요') +
             ' · ' +
             event.actor.id.slice(0, 8)
           : '이전 기록 · 계정 정보 없음';
@@ -1577,6 +1579,255 @@
     } finally {
       button.disabled = false;
     }
+  };
+
+  // ===== 백업 복원 =====
+  let restorePlan = null;
+  $('restore-pick').onclick = () => $('restore-input').click();
+  $('restore-input').onchange = async () => {
+    const file = $('restore-input').files[0];
+    $('restore-input').value = '';
+    restorePlan = null;
+    $('restore-run').hidden = true;
+    if (!file) return;
+    try {
+      if (file.size > 60 * 1048576) throw new Error('백업 파일이 너무 큽니다.');
+      const data = window.BoardExport.parseBackup(await file.text(), core.validEvent);
+      const ordered = window.BoardExport.orderForRestore(data.events, [...events.keys()]);
+      const same = data.department?.name && deptName && data.department.name !== deptName;
+      restorePlan = ordered;
+      showMessage(
+        'restore-info',
+        '백업 파일 ' +
+          data.events.length.toLocaleString('ko-KR') +
+          '건 중 이 보드에 없는 ' +
+          ordered.length.toLocaleString('ko-KR') +
+          '건을 복원합니다.' +
+          (same ? ' ⚠ 이 백업은 “' + data.department.name + '” 부서의 것입니다. 지금 부서는 “' + deptName + '”입니다.' : '') +
+          (ordered.length ? '' : ' 복원할 기록이 없습니다.'),
+        !same,
+      );
+      $('restore-run').hidden = !ordered.length;
+    } catch (error) {
+      showMessage('restore-info', error.message);
+    }
+  };
+  $('restore-run').onclick = async () => {
+    if (!restorePlan?.length) return;
+    const plan = restorePlan,
+      button = $('restore-run');
+    button.disabled = true;
+    let added = 0,
+      done = 0;
+    try {
+      for (let i = 0; i < plan.length; i += 200) {
+        const result = await storage.restoreEvents(plan.slice(i, i + 200));
+        added += result.added;
+        done = Math.min(plan.length, i + 200);
+        showMessage('restore-info', '복원 중… ' + done.toLocaleString('ko-KR') + ' / ' + plan.length.toLocaleString('ko-KR'), true);
+      }
+      restorePlan = null;
+      button.hidden = true;
+      storage.forceFull?.();
+      events = new Map();
+      cacheSaved = -1;
+      await refresh();
+      showMessage('restore-info', '복원했습니다. ' + added.toLocaleString('ko-KR') + '건을 다시 채웠습니다.', true);
+    } catch (error) {
+      showMessage(
+        'restore-info',
+        error.message + ' (' + done.toLocaleString('ko-KR') + '건까지 복원했습니다. 같은 파일로 다시 시도하면 이어서 복원됩니다.)',
+      );
+    } finally {
+      button.disabled = false;
+    }
+  };
+
+  // ===== 부서 관리(관리자) =====
+  function twoStep(button, armedLabel, action) {
+    const original = button.textContent;
+    let timer;
+    button.onclick = () => {
+      if (button.classList.contains('armed')) {
+        clearTimeout(timer);
+        button.classList.remove('armed');
+        button.textContent = original;
+        return action();
+      }
+      button.classList.add('armed');
+      button.textContent = armedLabel;
+      timer = setTimeout(() => {
+        button.classList.remove('armed');
+        button.textContent = original;
+      }, 5000);
+    };
+  }
+  function showNewCode(title, code) {
+    const box = $('admin-code-box');
+    box.hidden = false;
+    const value = el('code', '', code);
+    const copy = el('button', 'secondary', '복사');
+    copy.type = 'button';
+    copy.onclick = () => copyText(code, '접속 코드를 복사했습니다.');
+    box.replaceChildren(
+      el('strong', '', title),
+      value,
+      copy,
+      el(
+        'p',
+        '',
+        '이 코드는 지금만 볼 수 있습니다. 부서원에게만 따로 알려 주세요. 창을 닫으면 다시 볼 수 없고, 필요하면 새로 만들 수 있습니다.',
+      ),
+    );
+    box.scrollIntoView({ block: 'nearest' });
+  }
+  let adminData = null;
+  async function adminRefresh() {
+    adminData = await storage.adminOverview();
+    const depts = adminData.depts;
+    $('admin-depts').replaceChildren(
+      ...depts.map(d => {
+        const card = el('div', 'admin-dept');
+        const name = el('input');
+        name.value = d.name;
+        name.maxLength = 40;
+        name.setAttribute('aria-label', d.id + ' 이름');
+        const rot = el('input');
+        rot.type = 'checkbox';
+        rot.checked = d.rotating;
+        const rotLabel = el('label', 'checkbox-label');
+        rotLabel.append(rot, document.createTextNode('순환 근무'));
+        const quota = el('input');
+        quota.type = 'number';
+        quota.min = 10;
+        quota.max = 1000;
+        quota.value = d.quotaMb;
+        quota.setAttribute('aria-label', d.id + ' 파일 용량(MB)');
+        const quotaLabel = el('label', '', '파일 용량(MB)');
+        quotaLabel.append(quota);
+        const save = el('button', 'secondary', '저장');
+        save.type = 'button';
+        save.onclick = async () => {
+          save.disabled = true;
+          try {
+            await storage.adminSaveDept(d.id, name.value.trim(), rot.checked, Number(quota.value));
+            showMessage('admin-message', '“' + name.value.trim() + '” 설정을 저장했습니다.', true);
+            await adminRefresh();
+          } catch (error) {
+            showMessage('admin-message', error.message);
+          }
+          save.disabled = false;
+        };
+        const fresh = el('button', 'secondary', '새 접속 코드');
+        fresh.type = 'button';
+        twoStep(fresh, '정말 새 코드 발급', async () => {
+          try {
+            const made = await storage.adminNewCode(d.id);
+            showNewCode('“' + d.name + '” 새 접속 코드 (이전 코드는 바로 쓸 수 없습니다)', made.code);
+          } catch (error) {
+            showMessage('admin-message', error.message);
+          }
+        });
+        const info = el(
+          'p',
+          'admin-info',
+          d.id + ' · 가입 ' + d.members + '명 · 기록 ' + d.events.toLocaleString('ko-KR') + '건 · 파일 ' + sizeLabel(d.filesBytes),
+        );
+        const fields = el('div', 'admin-fields');
+        fields.append(name, rotLabel, quotaLabel);
+        const actions = el('div', 'admin-actions');
+        actions.append(save, fresh);
+        card.append(info, fields, actions);
+        return card;
+      }),
+    );
+    const filter = $('admin-member-filter'),
+      kept = filter.value;
+    filter.replaceChildren(new Option('모든 부서', ''), ...depts.map(d => new Option(d.name, d.id)));
+    filter.value = depts.some(d => d.id === kept) ? kept : '';
+    renderAdminMembers();
+  }
+  function renderAdminMembers() {
+    const names = new Map(adminData.depts.map(d => [d.id, d.name])),
+      only = $('admin-member-filter').value;
+    const rows = adminData.members.filter(m => !only || m.dept === only);
+    if (!rows.length) return $('admin-members').replaceChildren(el('p', 'ho-empty', '가입자가 없습니다.'));
+    $('admin-members').replaceChildren(
+      ...rows.map(m => {
+        const row = el('div', 'admin-member');
+        const text = el('div');
+        text.append(
+          el('strong', '', m.name || '(이름 없음)'),
+          el('small', '', (names.get(m.dept) || m.dept) + ' · ' + absoluteTime(m.joinedAt) + ' · 계정 ' + m.short),
+        );
+        const remove = el('button', 'file-del', '제거');
+        remove.type = 'button';
+        twoStep(remove, '정말 제거', async () => {
+          try {
+            await storage.adminRemoveMember(m.userId);
+            showMessage('admin-message', '가입자를 제거했습니다. 이 계정은 다른 부서에 다시 가입할 수 있습니다.', true);
+            await adminRefresh();
+          } catch (error) {
+            showMessage('admin-message', error.message);
+          }
+        });
+        row.append(text, remove);
+        return row;
+      }),
+    );
+  }
+  async function openAdmin() {
+    $('admin-message').hidden = true;
+    $('admin-code-box').hidden = true;
+    $('admin-code').value = '';
+    $('admin-dialog').showModal();
+    try {
+      const admin = await storage.adminIsAdmin();
+      $('admin-login').hidden = admin;
+      $('admin-panel').hidden = !admin;
+      if (admin) await adminRefresh();
+    } catch (error) {
+      $('admin-login').hidden = false;
+      $('admin-panel').hidden = true;
+      showMessage('admin-message', error.message);
+    }
+  }
+  $('admin-open').onclick = openAdmin;
+  $('admin-close').onclick = () => $('admin-dialog').close();
+  $('admin-enter').onclick = async () => {
+    const button = $('admin-enter');
+    button.disabled = true;
+    try {
+      await storage.adminLogin($('admin-code').value.trim());
+      $('admin-code').value = '';
+      $('admin-message').hidden = true;
+      $('admin-login').hidden = true;
+      $('admin-panel').hidden = false;
+      await adminRefresh();
+    } catch (error) {
+      showMessage('admin-message', error.message);
+    }
+    button.disabled = false;
+  };
+  $('admin-code').addEventListener('keydown', event => event.key === 'Enter' && $('admin-enter').click());
+  $('admin-member-filter').onchange = renderAdminMembers;
+  $('admin-create').onclick = async () => {
+    const button = $('admin-create');
+    button.disabled = true;
+    try {
+      const made = await storage.adminCreateDept(
+        $('admin-new-id').value.trim(),
+        $('admin-new-name').value.trim(),
+        $('admin-new-rotating').checked,
+      );
+      showNewCode('“' + $('admin-new-name').value.trim() + '” 부서가 만들어졌습니다. 접속 코드', made.code);
+      $('admin-new-id').value = '';
+      $('admin-new-name').value = '';
+      await adminRefresh();
+    } catch (error) {
+      showMessage('admin-message', error.message);
+    }
+    button.disabled = false;
   };
 
   // ===== 기록 내려받기 =====

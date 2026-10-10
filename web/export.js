@@ -166,7 +166,44 @@
     );
   }
 
-  const api = { csvCell, toCsv, kst, itemsCsv, revisionsCsv, logbookCsv, backupJson };
+  // What a backup file would add to this board, in an order the server accepts (parents before children, whatever the clocks say).
+  function parseBackup(text, validEvent) {
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error('백업 파일(JSON)을 읽을 수 없습니다.');
+    }
+    if (!data || data.schema !== 1 || !Array.isArray(data.events)) throw new Error('이 보드의 백업 파일이 아닙니다.');
+    if (!data.events.length) throw new Error('백업 파일에 기록이 없습니다.');
+    if (data.events.length > 20000) throw new Error('백업 파일의 기록이 너무 많습니다 (20,000건 이하).');
+    for (const event of data.events) if (!validEvent(event)) throw new Error('백업 파일에 올바르지 않은 기록이 있어 복원하지 않았습니다.');
+    return data;
+  }
+  function orderForRestore(events, existingIds) {
+    const present = new Set(existingIds),
+      byId = new Map(),
+      ordered = [];
+    for (const event of events) if (!present.has(event.id)) byId.set(event.id, event);
+    const visit = (event, stack) => {
+      if (!byId.has(event.id)) return;
+      if (stack.has(event.id)) throw new Error('백업 파일의 수정 기록이 순환 연결되어 있습니다.');
+      stack.add(event.id);
+      for (const parent of event.parents) {
+        if (present.has(parent)) continue;
+        const parentEvent = byId.get(parent);
+        if (!parentEvent) throw new Error('백업 파일에 이전 수정 기록이 빠져 있어 복원할 수 없습니다.');
+        visit(parentEvent, stack);
+      }
+      byId.delete(event.id);
+      present.add(event.id);
+      ordered.push(event);
+    };
+    for (const event of [...byId.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id))) visit(event, new Set());
+    return ordered;
+  }
+
+  const api = { parseBackup, orderForRestore, csvCell, toCsv, kst, itemsCsv, revisionsCsv, logbookCsv, backupJson };
   root.BoardExport = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

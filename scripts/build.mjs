@@ -18,7 +18,7 @@ for (const backend of ['guest', 'supabase']) {
     if (name === 'index.html') content = Buffer.from(content.toString().replace(/\?v=\d+\.\d+\.\d+/g, '?v=' + version));
     await fs.writeFile(path.join(folder, name), content);
   }
-  const cfg = { backend: backend === 'guest' ? 'router-guest' : 'supabase', storagePath: '/HDD1/serotonin-board-tests/guest/data', dataUrl: './data/', pollMilliseconds: 15000, maxEvents: backend === 'supabase' ? 20000 : 1000, version, supabaseUrl: backend === 'supabase' ? supabasePublic.supabaseUrl || '' : '', publishableKey: backend === 'supabase' ? supabasePublic.publishableKey || '' : '', ...(backend === 'guest' ? { signing: true, registryUrl: './users.json', routerOrigin: 'http://192.168.0.1' } : {}) };
+  const cfg = { backend: backend === 'guest' ? 'router-guest' : 'supabase', storagePath: '/HDD1/serotonin-board-tests/guest/data', dataUrl: './data/', pollMilliseconds: 15000, maxEvents: backend === 'supabase' ? 20000 : 1000, version, supabaseUrl: backend === 'supabase' ? supabasePublic.supabaseUrl || '' : '', publishableKey: backend === 'supabase' ? supabasePublic.publishableKey || '' : '', ...(backend === 'supabase' && supabasePublic.turnstileSiteKey ? { turnstileSiteKey: supabasePublic.turnstileSiteKey } : {}), ...(backend === 'guest' ? { signing: true, registryUrl: './users.json', routerOrigin: 'http://192.168.0.1' } : {}) };
   await fs.writeFile(path.join(folder, 'config.js'), '// Public configuration only; no passwords or secret keys.\nwindow.BOARD_CONFIG = Object.freeze(' + JSON.stringify(cfg, null, 2) + ');\n');
 }
 await fs.copyFile('web/comparison.html', path.join(output, 'index.html'));

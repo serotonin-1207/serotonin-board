@@ -140,7 +140,7 @@
         <div class="board-grid" id="note-grid" aria-live="polite"></div>
         <div class="empty-state" id="empty-state" hidden><div class="empty-art"><svg><use href="#i-note"/></svg><span>+</span></div><h3 id="empty-title">첫 번째 기록을 남겨 보세요.</h3><p id="empty-description">새 메모를 작성하면 같은 보드에 접속한 동료도 볼 수 있어요.</p><button class="secondary" id="empty-new">첫 메모 작성<svg><use href="#i-arrow"/></svg></button></div>
       </section>
-      <footer><span><span class="footer-dot"></span>기록은 공유기에 연결된 SSD에 보관합니다.</span><span class="footer-actions"><button class="text-button" id="export-open">기록 내려받기</button><button class="text-button" id="settings-button">연결 설정</button></span></footer>
+      <footer><span><span class="footer-dot"></span>기록은 공유기에 연결된 SSD에 보관합니다.</span><span class="footer-actions"><button class="text-button" id="export-open">기록 내려받기</button><button class="text-button" id="admin-open" data-cloud hidden>관리</button><button class="text-button" id="settings-button">연결 설정</button></span></footer>
     </div>
   </main>
 </div>
@@ -186,7 +186,37 @@
     <button class="export-item" data-export="revisions"><strong>수정 이력 전체 <em>CSV · 엑셀</em></strong><span>저장된 모든 기록을 시간순으로. 누가 언제 무엇을 바꿨는지 확인합니다.</span></button>
     <button class="export-item" data-export="backup"><strong>전체 백업 <em>JSON</em></strong><span>모든 기록을 원형 그대로. 보관용이며 다른 도구로 옮길 때 씁니다.</span></button>
   </div>
+  <div class="restore-box" data-cloud hidden>
+    <strong>백업 파일로 복원</strong>
+    <span>위의 <em>전체 백업(JSON)</em> 파일을 불러와 이 부서에 없는 기록만 다시 채웁니다. 이미 있는 기록은 건드리지 않고, 복원된 기록은 수정 기록에 “복원됨”으로 표시됩니다.</span>
+    <div class="restore-actions"><button class="secondary" type="button" id="restore-pick">백업 파일 선택</button><button class="primary" type="button" id="restore-run" hidden>복원 시작</button></div>
+    <input type="file" id="restore-input" accept=".json,application/json" hidden>
+    <p class="form-message" id="restore-info" role="status" hidden></p>
+  </div>
   <p class="form-message" id="export-message" role="status" hidden></p>
+</dialog>
+<dialog id="admin-dialog" class="settings-dialog admin-dialog">
+  <div class="dialog-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h2>부서 관리</h2></div><button class="close-button" id="admin-close" aria-label="닫기">×</button></div>
+  <div id="admin-login">
+    <p class="settings-intro">관리자 코드를 입력하면 부서와 접속 코드, 가입자를 관리할 수 있습니다. 관리자도 다른 부서의 메모와 파일은 볼 수 없습니다.</p>
+    <label>관리자 코드<input id="admin-code" type="password" autocomplete="off" spellcheck="false" placeholder="관리자 코드"></label>
+    <div class="dialog-actions"><span class="action-spacer"></span><button class="primary" type="button" id="admin-enter">관리자로 들어가기</button></div>
+  </div>
+  <div id="admin-panel" hidden>
+    <div class="admin-code-box" id="admin-code-box" hidden role="status"></div>
+    <h3 class="admin-title">부서</h3>
+    <div id="admin-depts"></div>
+    <h3 class="admin-title">새 부서 만들기</h3>
+    <div class="admin-new">
+      <label>부서 ID<input id="admin-new-id" maxlength="30" placeholder="rescue" autocomplete="off"></label>
+      <label>이름<input id="admin-new-name" maxlength="40" placeholder="구조대" autocomplete="off"></label>
+      <label class="checkbox-label"><input type="checkbox" id="admin-new-rotating" checked>순환 근무(3팀·09:00 교대)</label>
+      <button class="primary" type="button" id="admin-create">부서 만들기</button>
+    </div>
+    <h3 class="admin-title">가입자 <select id="admin-member-filter" aria-label="부서 거르기"></select></h3>
+    <div id="admin-members"></div>
+  </div>
+  <p class="form-message" id="admin-message" role="status" hidden></p>
 </dialog>
 <dialog id="history-dialog" class="history-dialog"><div class="dialog-heading"><div><p class="eyebrow">NOTE HISTORY</p><h2>수정 기록</h2></div><button class="close-button" id="history-close" aria-label="닫기">×</button></div><p class="history-intro" id="history-intro"></p><div id="history-list"></div></dialog>
 <div id="toast" class="toast" role="status" hidden></div>

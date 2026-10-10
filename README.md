@@ -39,6 +39,14 @@ npm run preview   # 개발용 로컬 미리보기
 
 자세한 순서와 한계는 [COMPARISON-SETUP.md](COMPARISON-SETUP.md), [TEST-PLAN.md](TEST-PLAN.md)를 참고하세요.
 
+## 운영 기능 (0.8.0, Supabase 버전)
+
+- **백업 복원**: **기록 내려받기 → 백업 파일로 복원**에서 JSON 백업을 불러오면 이 부서에 없는 기록만 원래 시각 그대로 다시 채웁니다(이미 있는 기록은 건드리지 않고, 두 번 해도 같습니다). 복원된 기록은 수정 기록에 "백업에서 복원됨"으로 표시됩니다. 다른 부서의 백업이면 경고합니다.
+- **부서 관리(관리자)**: 하단의 **관리**에서 관리자 코드를 입력하면 부서 만들기(접속 코드 자동 발급, 한 번만 표시), 이름·순환 근무·파일 용량 변경, 접속 코드 다시 발급, 가입자 목록과 제거를 할 수 있습니다. 관리자도 다른 부서의 메모와 파일은 볼 수 없습니다. 관리자 코드는 `serotonin_settings`에 해시로만 저장하며, 바꾸려면 SQL로 `admin_code_hash`를 새 해시로 바꿉니다.
+- **서버 자동 삭제**: `supabase/functions/purge-files`(Edge Function)를 `pg_cron`이 10분마다 호출해 만료된 파일을 저장소에서 지웁니다(`supabase/migrations/0.8.0-cron.sql`). 함수는 입력을 받지 않고 이미 만료된 파일만 지우므로 별도의 비밀 값이 없습니다(JWT 확인은 끔). 프로젝트가 일시 정지되면 예약 작업도 멈추며, 접속한 브라우저의 정리가 보조로 동작합니다.
+- **잠들기 방지**: `.github/workflows/keepalive.yml`이 이틀마다 공개 함수 `serotonin_ping`을 호출합니다. GitHub는 60일 동안 커밋이 없으면 예약 작업을 멈추므로, 가끔 커밋이 있어야 합니다.
+- **봇 방지(선택)**: 임시 계정을 대량으로 만드는 것을 막으려면 Cloudflare Turnstile 위젯을 만들고, 사이트 키를 `supabase/public-config.json`의 `turnstileSiteKey`에 넣고 빌드한 뒤, Supabase Authentication → Attack Protection에서 CAPTCHA를 켜고 **비밀 키는 Supabase 화면에 직접 입력**하세요. 사이트 키는 공개해도 되지만 비밀 키는 저장소에 넣지 마세요.
+
 ## 파일 주고받기 (0.7.0, Supabase 버전)
 
 사이드바의 **파일**에서 같은 부서원끼리 파일을 주고받는 **임시 파일함**을 씁니다.

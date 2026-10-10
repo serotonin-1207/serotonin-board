@@ -176,7 +176,8 @@ export class SupabaseStorage {
       const current = await this.client.auth.getSession();
       if (current.error) throw current.error;
       if (current.data.session) return current.data.session.user;
-      const created = await this.client.auth.signInAnonymously();
+      const captchaToken = await this.captchaToken();
+      const created = await this.client.auth.signInAnonymously(captchaToken ? { options: { captchaToken } } : undefined);
       if (created.error)
         throw new Error('임시 계정 연결 실패: ' + created.error.message + ' · Supabase의 Anonymous Sign-Ins 설정을 확인해 주세요.');
       return created.data.user;
@@ -264,6 +265,101 @@ export class SupabaseStorage {
     this.mark = newest || this.mark;
     if (full) this.fullAt = Date.now();
     return [...merged.values()];
+  }
+  // ===== Restore from a backup file, administrator functions, bot check =====
+  opsMessage(error) {
+    const text = String(error?.message || error || '');
+    const known = [
+      [/Administrator required/, '관리자 권한이 필요합니다. 관리자 코드를 입력해 주세요.'],
+      [/Department id already exists/, '이미 있는 부서 ID입니다.'],
+      [/Invalid department id/, '부서 ID는 영문 소문자, 숫자, -, _ 2~30자로 정해 주세요.'],
+      [/Invalid department name/, '부서 이름은 1~40자로 정해 주세요.'],
+      [/Quota must be/, '파일 용량은 10~1000MB 사이로 정해 주세요.'],
+      [/Unknown department/, '없는 부서입니다.'],
+      [/Invalid revision time/, '백업 파일의 기록 시각이 올바르지 않습니다.'],
+      [/Parent revision/, '백업 파일의 이전 수정 기록이 맞지 않습니다.'],
+      [/already used/, '다른 부서의 기록과 번호가 겹쳐 복원할 수 없습니다.'],
+      [/requires a parent/, '같은 메모의 다른 처음 기록이 이미 있어 복원할 수 없습니다.'],
+      [/revision limit/, '기록 한도(20,000건)에 도달했습니다.'],
+      [/Access code required/, '접속 코드 등록이 필요합니다.'],
+    ];
+    for (const [pattern, message] of known) if (pattern.test(text)) return message;
+    return text;
+  }
+  async restoreEvents(batch) {
+    await this.session();
+    const result = await this.client.rpc('serotonin_restore_events', { p_events: batch });
+    if (result.error) throw new Error(this.opsMessage(result.error));
+    return result.data;
+  }
+  async adminCall(name, args) {
+    await this.session();
+    const result = await this.client.rpc(name, args);
+    if (result.error)
+      throw new Error(
+        this.opsMessage(result.error) +
+          (/function .* does not exist|Could not find the function/.test(result.error.message)
+            ? ' · setup.sql 실행 여부를 확인해 주세요.'
+            : ''),
+      );
+    return result.data;
+  }
+  adminIsAdmin() {
+    return this.adminCall('serotonin_is_admin');
+  }
+  async adminLogin(code) {
+    const data = await this.adminCall('serotonin_admin_login', { p_code: code });
+    if (data?.admin !== true)
+      throw new Error(
+        data?.error === 'locked' ? '관리자 코드를 여러 번 틀렸습니다. 1시간 뒤 다시 시도해 주세요.' : '관리자 코드가 맞지 않습니다.',
+      );
+    return true;
+  }
+  adminOverview() {
+    return this.adminCall('serotonin_admin_overview');
+  }
+  adminCreateDept(id, name, rotating) {
+    return this.adminCall('serotonin_admin_dept_create', { p_id: id, p_name: name, p_rotating: rotating });
+  }
+  adminSaveDept(id, name, rotating, quotaMb) {
+    return this.adminCall('serotonin_admin_dept_save', { p_id: id, p_name: name, p_rotating: rotating, p_quota_mb: quotaMb });
+  }
+  adminNewCode(id) {
+    return this.adminCall('serotonin_admin_dept_newcode', { p_id: id });
+  }
+  adminRemoveMember(userId) {
+    return this.adminCall('serotonin_admin_member_remove', { p_user: userId });
+  }
+  // Cloudflare Turnstile token for anonymous sign-ins, only when the project turned the bot check on (config.turnstileSiteKey).
+  async captchaToken() {
+    const siteKey = this.cfg.turnstileSiteKey;
+    if (!siteKey) return undefined;
+    if (!window.turnstile) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+        script.async = true;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('봇 방지 확인 도구를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.'));
+        document.head.append(script);
+      });
+    }
+    return new Promise((resolve, reject) => {
+      const holder = document.createElement('div');
+      holder.style.cssText = 'position:fixed;bottom:12px;right:12px;z-index:50';
+      document.body.append(holder);
+      const finish = (fn, value) => {
+        holder.remove();
+        fn(value);
+      };
+      const timer = setTimeout(() => finish(reject, new Error('봇 방지 확인이 끝나지 않았습니다. 다시 시도해 주세요.')), 60000);
+      window.turnstile.render(holder, {
+        sitekey: siteKey,
+        appearance: 'interaction-only',
+        callback: token => (clearTimeout(timer), finish(resolve, token)),
+        'error-callback': () => (clearTimeout(timer), finish(reject, new Error('봇 방지 확인에 실패했습니다. 다시 시도해 주세요.'))),
+      });
+    });
   }
   // ===== File sharing (private bucket, same department only, kept at most 7 days) =====
   fileMessage(error) {

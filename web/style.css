@@ -176,3 +176,29 @@ button.armed svg{color:#fff}
   .file-item .file-btn{justify-self:start}.file-item .file-del{justify-self:end;margin-top:-46px}
   .file-upload{grid-template-columns:1fr auto;row-gap:8px}.file-upload .ho-bar{grid-column:1/-1;order:3}
 }
+/* ===== 백업 복원 · 부서 관리 ===== */
+.restore-box{margin-top:18px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:#f8f9f4;display:flex;flex-direction:column;gap:8px}
+.restore-box strong{font-size:13px}.restore-box span{font-size:12px;color:#6e7964;line-height:1.7}.restore-box em{font-style:normal;font-weight:600}
+.restore-actions{display:flex;gap:8px;flex-wrap:wrap}
+.admin-dialog{width:min(760px,calc(100% - 28px))}
+.admin-title{font-size:14px;font-weight:650;margin:22px 0 10px;display:flex;align-items:center;gap:10px}
+.admin-title select{font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.admin-dept{border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;background:#fff}
+.admin-info{margin:0 0 10px;font-size:12px;color:#6e7964}
+.admin-fields{display:grid;grid-template-columns:1.4fr auto 1fr;gap:10px;align-items:end}
+.admin-fields input:not([type=checkbox]){width:100%;border:1px solid #e1e6d9;border-radius:9px;padding:10px 12px;background:#fcfdf9;font-size:13px;margin-top:4px}
+.admin-fields label{margin:0;font-size:11px}
+.admin-actions{display:flex;gap:8px;margin-top:10px}
+.admin-actions .secondary{font-size:11px;min-height:36px;padding:8px 12px}
+.admin-actions .armed,.admin-member .armed{background:#a8321a!important;border-color:#a8321a!important;color:#fff!important}
+.admin-new{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}
+.admin-new label{margin:0;font-size:11px}
+.admin-new input:not([type=checkbox]){width:100%;border:1px solid #e1e6d9;border-radius:9px;padding:10px 12px;background:#fcfdf9;font-size:13px;margin-top:4px}
+.admin-new .primary{grid-column:1/-1}
+.admin-member{display:flex;justify-content:space-between;align-items:center;gap:10px;border-bottom:1px solid #eceee5;padding:9px 2px}
+.admin-member small{display:block;color:#7b886c;font-size:11px;margin-top:3px}
+.admin-code-box{background:#fff8e6;border:1px solid #ecd9a3;border-radius:12px;padding:14px;margin-bottom:6px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.admin-code-box strong{flex:1 1 100%;font-size:13px}
+.admin-code-box code{font-size:16px;font-weight:700;letter-spacing:.5px;background:#fff;border:1px solid #ecd9a3;border-radius:8px;padding:8px 12px;word-break:break-all}
+.admin-code-box p{flex:1 1 100%;margin:0;font-size:11px;color:#8a6d1f;line-height:1.7}
+@media(max-width:680px){.admin-fields,.admin-new{grid-template-columns:1fr}}
