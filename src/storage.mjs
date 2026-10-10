@@ -2,6 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 import * as signing from './signing.mjs';
 
 const { canonical } = signing;
+const PAGE_SIZE = 500,
+  OVERLAP_MS = 120000,
+  FULL_RELOAD_EVERY = 20;
 
 export function publicSupabaseConfig(url, key) {
   let parsed;
@@ -200,24 +203,37 @@ export class SupabaseStorage {
     }
     return { id: user.id, kind: user.is_anonymous ? 'anonymous' : 'account' };
   }
-  async list() {
+  // Revisions never change, so after a full first read only rows saved since the last read are fetched. The window overlaps by two
+  // minutes (a transaction can commit slightly out of saved_at order) and every 20th read is a full re-read as a safety net.
+  async list(previous = new Map()) {
     const user = await this.session();
-    const events = [];
-    for (let offset = 0; offset <= this.cfg.maxEvents; offset += 500) {
-      const result = await this.client
+    this.reads = (this.reads || 0) + 1;
+    const full = !previous.size || !this.mark || this.reads % FULL_RELOAD_EVERY === 0;
+    const merged = full ? new Map() : new Map(previous);
+    const since = full ? null : new Date(this.mark - OVERLAP_MS).toISOString();
+    let newest = full ? 0 : this.mark;
+    for (let offset = 0; ; offset += PAGE_SIZE) {
+      let query = this.client
         .from('serotonin_test_events')
-        .select('event')
-        .order('id', { ascending: true })
-        .range(offset, offset + 499);
+        .select('event, saved_at')
+        .order('saved_at', { ascending: true })
+        .order('id', { ascending: true });
+      if (since) query = query.gte('saved_at', since);
+      const result = await query.range(offset, offset + PAGE_SIZE - 1);
       if (result.error) throw new Error('클라우드 기록 읽기 실패: ' + result.error.message);
       // Row-level security hides rows from non-members instead of failing, so an empty board needs a membership check.
-      if (offset === 0 && !result.data.length && !(await this.checkMembership(user)))
+      if (full && offset === 0 && !result.data.length && !(await this.checkMembership(user)))
         throw new Error('접속 코드 등록이 필요합니다. 연결 설정에서 관리자에게 받은 접속 코드를 입력해 주세요.');
-      events.push(...result.data.map(row => requireEvent(row.event)));
-      if (events.length > this.cfg.maxEvents) throw new Error('시험판 기록 한도에 도달했습니다.');
-      if (result.data.length < 500) break;
+      for (const row of result.data) {
+        const event = requireEvent(row.event);
+        merged.set(event.id, event);
+        newest = Math.max(newest, Date.parse(row.saved_at) || 0);
+      }
+      if (merged.size > this.cfg.maxEvents) throw new Error('시험판 기록 한도에 도달했습니다.');
+      if (result.data.length < PAGE_SIZE) break;
     }
-    return events;
+    this.mark = newest || this.mark;
+    return [...merged.values()];
   }
   async append(event) {
     await this.session();

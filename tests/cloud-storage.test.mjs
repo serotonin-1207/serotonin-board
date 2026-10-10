@@ -19,3 +19,34 @@ test('save requires matching server payload and a separate matching read-back',a
  readback={...event,note:{...event.note,content:'손상'}};await assert.rejects(storage.append(event),/내용 확인/);
  const changed={...event,note:{...event.note,title:'다른 요청'}};await assert.rejects(storage.append(changed),/요청과 다릅니다/);
 });
+
+test('after the first full read only newer rows are fetched, with an overlap, and a periodic full re-read', async () => {
+  const mk = (n, savedAt) => ({ saved_at: savedAt, event: { ...event, id: n.toString(16).padStart(32, '0'), noteId: n.toString(16).padStart(32, '0') } });
+  const rows = [mk(1, '2026-10-09T10:00:00.000000+00:00'), mk(2, '2026-10-09T10:05:00.000000+00:00')];
+  const calls = [];
+  const storage = new SupabaseStorage({ maxEvents: 20000 }, {});
+  storage.session = async () => ({ id: 'u' });
+  storage.client = {
+    from: () => {
+      const q = { since: null };
+      const api = {
+        select: () => api, order: () => api,
+        gte: (col, value) => { q.since = value; return api; },
+        range: async () => { calls.push(q.since); return { data: q.since ? rows.filter(r => Date.parse(r.saved_at) >= Date.parse(q.since)) : rows, error: null }; },
+      };
+      return api;
+    },
+  };
+  const first = await storage.list(new Map());
+  assert.equal(first.length, 2);
+  assert.equal(calls[0], null); // full read
+  rows.push(mk(3, '2026-10-09T10:09:00.000000+00:00'));
+  const second = await storage.list(new Map(first.map(e => [e.id, e])));
+  assert.equal(second.length, 3);
+  assert.ok(calls[1]); // incremental
+  assert.ok(Date.parse(calls[1]) <= Date.parse('2026-10-09T10:05:00Z') && Date.parse(calls[1]) >= Date.parse('2026-10-09T10:02:30Z')); // 2 min before the newest row seen
+  const third = await storage.list(new Map(second.map(e => [e.id, e])));
+  assert.equal(third.length, 3); // overlap re-reads rows without duplicating them
+  for (let i = 0; i < 20; i++) await storage.list(new Map(third.map(e => [e.id, e])));
+  assert.ok(calls.filter(c => c === null).length >= 2); // safety-net full re-read happened again
+});

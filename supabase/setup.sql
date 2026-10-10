@@ -8,6 +8,7 @@ create table if not exists public.serotonin_test_events (
   saved_at timestamptz not null default now(),
   event jsonb not null
 );
+create index if not exists serotonin_test_events_saved_at on public.serotonin_test_events(saved_at);
 alter table public.serotonin_test_events enable row level security;
 revoke all on public.serotonin_test_events from public, anon, authenticated;
 grant select on public.serotonin_test_events to authenticated;
@@ -129,7 +130,7 @@ begin
     then return old_record.event; end if;
     raise exception 'Revision ID already used';
   end if;
-  if (select count(*) from public.serotonin_test_events) >= 1000 then raise exception 'Test revision limit reached'; end if;
+  if (select count(*) from public.serotonin_test_events) >= 20000 then raise exception 'Test revision limit reached'; end if;
   if (select count(*) from public.serotonin_test_events where actor_id=user_id and saved_at > now()-interval '1 minute') >= 30 then raise exception 'Please wait before saving again'; end if;
   for parent_id in select jsonb_array_elements_text(input->'parents') loop
     if parent_id !~ '^[a-f0-9]{32}$' or parent_id=input->>'id'

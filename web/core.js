@@ -44,6 +44,39 @@
     const start = addDays(first, -offset);
     return Array.from({ length }, (_, index) => addDays(start, index));
   }
+  // Handover checklist: one note per item (category '인수인계'). An item is listed on every shift day from the day it
+  // was written until the day after it was completed, so unfinished items carry over automatically and finished ones
+  // drop off. Past days are rebuilt from the revision history, so nothing is ever lost.
+  const HANDOVER_CATEGORY = '인수인계';
+  const MEMO_CATEGORIES = ['공지사항', '업무 메모'];
+  // The shift day D ends at 09:00 KST on D+1, which is 00:00 UTC on D+1.
+  function dayEndMs(day) {
+    return (dayNumber(day) + 1) * DAY_MS;
+  }
+  function stateAt(note, limitMs) {
+    let last = null;
+    for (const e of note.history) {
+      if (Date.parse(e.at) >= limitMs) break;
+      last = e;
+    }
+    return last;
+  }
+  function handoverOn(notes, day) {
+    const endMs = dayEndMs(day),
+      startMs = endMs - DAY_MS,
+      items = [];
+    for (const note of notes) {
+      if (note.category !== HANDOVER_CATEGORY) continue;
+      const end = stateAt(note, endMs);
+      if (!end || end.note.deleted) continue;
+      const before = stateAt(note, startMs);
+      const done = end.note.status === 'done';
+      if (before && !before.note.deleted && before.note.status === 'done' && done) continue;
+      const createdDay = dutyDay(note.history[0].at);
+      items.push({ note, state: end, done, pinned: end.note.pinned, createdDay, carriedDays: Math.max(0, daysBetween(createdDay, day)) });
+    }
+    return items.sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.note.history[0].at.localeCompare(b.note.history[0].at) || a.note.id.localeCompare(b.note.id));
+  }
   function validSchedule(n) {
     if (!SCHEDULE_KINDS.includes(n.kind) || !validDay(n.date)) return false;
     if (n.endDate === undefined) return true;
@@ -134,6 +167,9 @@
     SCHEDULE_CATEGORY,
     SCHEDULE_KINDS,
     MAX_SCHEDULE_DAYS,
+    HANDOVER_CATEGORY,
+    MEMO_CATEGORIES,
+    handoverOn,
     TEAM_COUNT,
     SHIFT_START_HOUR,
     validEvent,

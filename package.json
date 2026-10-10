@@ -1,6 +1,6 @@
 {
   "name": "serotonin-router-board",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "공동 메모·근무 달력 보드 (공유기 SSD 또는 Supabase 저장)",
   "scripts": {
