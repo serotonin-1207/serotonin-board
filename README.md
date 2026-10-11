@@ -39,6 +39,14 @@ npm run preview   # 개발용 로컬 미리보기
 
 자세한 순서와 한계는 [COMPARISON-SETUP.md](COMPARISON-SETUP.md), [TEST-PLAN.md](TEST-PLAN.md)를 참고하세요.
 
+## 브라우저 확장 프로그램 (0.11.0, 확장 프로그램 0.1.0)
+
+Chrome·Edge 도구 막대에서 오늘 근무팀 배지, 오늘·내일 일정, 미완료 인수인계를 보고 교대 전 알림을 받으며, 웹페이지에서 선택한 글을 오른쪽 클릭으로 인수인계나 메모에 저장합니다. 소스는 `extension/`, 빌드는 `npm run build:extension`(`dist-extension/`과 스토어용 zip)입니다.
+
+- 보드와 같은 Supabase·접속 코드를 씁니다. 접속 코드는 저장하지 않고 임시 계정 로그인만 `chrome.storage`에 둡니다.
+- 서버는 DB 함수 `serotonin_member_summary` 하나만 새로 읽습니다(`supabase/migrations/0.11.0-extension.sql`, `setup.sql`에도 포함). 같은 부서의 일정과 미완료 인수인계만 돌려줍니다.
+- 사용법은 [확장 프로그램 사용 안내](docs/extension-guide.md), 웹 스토어 등록 준비는 [웹 스토어 등록 준비](docs/extension-store.md), 개인정보 처리방침은 `web/privacy.html`(보드와 함께 배포)입니다.
+
 ## 텔레그램 일정 알림 (0.10.0, Supabase 버전)
 
 달력의 **일정**(휴가·교육·훈련 등)을 부서별 텔레그램 대화방으로 알려 줍니다. **인수인계는 알리지 않고** 보드에서만 확인합니다. 일정 제목은 그대로 보냅니다.

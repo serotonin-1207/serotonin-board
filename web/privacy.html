@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>개인정보 처리방침 · Serotonin 보드</title>
+    <style>
+      :root{color-scheme:light dark;font-family:"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;line-height:1.8}
+      body{max-width:720px;margin:0 auto;padding:32px 20px 60px;background:#f6f5f1;color:#252b29}
+      @media(prefers-color-scheme:dark){body{background:#1f2321;color:#eceee8}a{color:#f0a384}}
+      h1{font-size:24px}h2{font-size:17px;margin-top:28px}li{margin:6px 0}
+    </style>
+  </head>
+  <body>
+    <h1>개인정보 처리방침</h1>
+    <p>Serotonin 메모 보드와 그 브라우저 확장 프로그램 "Serotonin 보드 도우미"에 적용됩니다. 최종 수정: 2026-10-11</p>
+
+    <h2>수집하는 정보</h2>
+    <ul>
+      <li><strong>사용자가 입력한 내용</strong>: 메모, 인수인계 항목, 일정, 올린 파일, 표시 이름. 소속 부서의 구성원만 볼 수 있으며 다른 부서는 볼 수 없습니다.</li>
+      <li><strong>임시 계정 정보</strong>: 이메일이나 전화번호 없이 만들어지는 익명 임시 계정 번호와 로그인 토큰. 접속 코드는 서버에 암호화 해시로만 보관하고 확장 프로그램에는 저장하지 않습니다.</li>
+      <li><strong>확장 프로그램 설정</strong>: 알림 시각과 켜기/끄기. 이 브라우저에만 저장됩니다.</li>
+    </ul>
+
+    <h2>사용 목적</h2>
+    <p>부서 구성원 사이에서 일정, 인수인계, 메모, 파일을 공유하고 알림을 보여 주기 위해서만 사용합니다. 광고, 분석, 추적, 제3자 판매나 제공은 하지 않습니다.</p>
+
+    <h2>저장 위치와 전송</h2>
+    <p>데이터는 클라우드 데이터베이스 서비스(Supabase)에 저장되며 보드와 확장 프로그램은 해당 서버와만 통신합니다. 일정 알림을 텔레그램으로 받도록 관리자가 설정한 부서는 일정 제목이 텔레그램으로 전달됩니다. 인수인계 항목은 전달하지 않습니다.</p>
+
+    <h2>확장 프로그램 권한</h2>
+    <ul>
+      <li><code>storage</code>: 임시 계정 로그인과 설정을 이 브라우저에 저장</li>
+      <li><code>alarms</code>: 10분마다 보드 내용을 확인</li>
+      <li><code>notifications</code>: 인수인계·일정 알림 표시</li>
+      <li><code>contextMenus</code>: 선택한 글을 보드에 저장하는 오른쪽 클릭 메뉴. 사용자가 메뉴를 눌렀을 때만 선택한 글과 그 페이지 주소를 보드로 보냅니다.</li>
+      <li>호스트 권한: 보드의 Supabase 서버 주소 한 곳</li>
+    </ul>
+
+    <h2>보관과 삭제</h2>
+    <p>메모와 일정은 수정 이력과 함께 보관되며 관리자가 부서 단위로 관리합니다. 파일은 최대 7일 뒤 자동 삭제됩니다. 확장 프로그램의 <em>연결 해제</em>를 누르면 이 브라우저의 저장 정보가 모두 지워집니다. 서버의 기록 삭제를 원하면 부서 관리자에게 요청하세요.</p>
+
+    <h2>문의</h2>
+    <p>보드를 운영하는 부서 관리자에게 문의하세요.</p>
+  </body>
+</html>

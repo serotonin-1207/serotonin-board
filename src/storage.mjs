@@ -170,6 +170,8 @@ export class SupabaseStorage {
             autoRefreshToken: true,
             detectSessionInUrl: false,
             storageKey: 'serotonin-cloud-' + new URL(url).hostname,
+            // the browser extension keeps its login in chrome.storage (a service worker has no localStorage)
+            ...(this.options.authStorage ? { storage: this.options.authStorage } : {}),
           },
         });
       }

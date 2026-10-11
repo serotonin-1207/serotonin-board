@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Serotonin 보드 도우미",
+  "version": "0.1.0",
+  "description": "부서 보드의 오늘 근무팀, 일정, 인수인계를 도구 막대에서 확인하고 알림을 받습니다.",
+  "minimum_chrome_version": "110",
+  "action": {
+    "default_title": "Serotonin 보드",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png" }
+  },
+  "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["storage", "alarms", "notifications", "contextMenus"],
+  "host_permissions": ["__SUPABASE_ORIGIN__/*"]
+}

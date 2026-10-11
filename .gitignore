@@ -4,3 +4,5 @@ artifacts/
 dist/
 *.log
 web/storage.js
+dist-extension/
+serotonin-board-extension-*.zip
