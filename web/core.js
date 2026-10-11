@@ -49,6 +49,8 @@
   // drop off. Past days are rebuilt from the revision history, so nothing is ever lost.
   const HANDOVER_CATEGORY = '인수인계';
   const MEMO_CATEGORIES = ['공지사항', '업무 메모'];
+  // Saved lists of handover items (name = title, one item per line = content). Shown only in the template dialog.
+  const TEMPLATE_CATEGORY = '템플릿';
   // Rotating (24h shift) departments change day at 09:00 KST = 00:00 UTC; office departments change day at midnight KST.
   const KST_OFFSET_MS = 9 * 3600000;
   function dayOffsetMs(rotating) {
@@ -84,6 +86,11 @@
     }
     return items.sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.note.history[0].at.localeCompare(b.note.history[0].at) || a.note.id.localeCompare(b.note.id));
   }
+  // Only handover items can name a person in charge (optional, 1-40 characters).
+  function validAssignee(n) {
+    if (n.assignee === undefined) return true;
+    return n.category === HANDOVER_CATEGORY && typeof n.assignee === 'string' && n.assignee.trim().length > 0 && n.assignee.length <= 40;
+  }
   function validSchedule(n) {
     if (!SCHEDULE_KINDS.includes(n.kind) || !validDay(n.date)) return false;
     if (n.endDate === undefined) return true;
@@ -111,8 +118,12 @@
       n.author.trim().length > 0 &&
       n.author.length <= 40 &&
       (n.category === SCHEDULE_CATEGORY
-        ? validSchedule(n)
-        : CATEGORIES.includes(n.category) && n.kind === undefined && n.date === undefined && n.endDate === undefined) &&
+        ? validSchedule(n) && n.assignee === undefined
+        : (CATEGORIES.includes(n.category) || n.category === TEMPLATE_CATEGORY) &&
+          n.kind === undefined &&
+          n.date === undefined &&
+          n.endDate === undefined &&
+          validAssignee(n)) &&
       STATUSES.includes(n.status) &&
       typeof n.pinned === 'boolean' &&
       typeof n.deleted === 'boolean'
@@ -176,6 +187,7 @@
     MAX_SCHEDULE_DAYS,
     HANDOVER_CATEGORY,
     MEMO_CATEGORIES,
+    TEMPLATE_CATEGORY,
     handoverOn,
     dayOfAt,
     TEAM_COUNT,

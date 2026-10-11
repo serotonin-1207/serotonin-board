@@ -9,6 +9,8 @@
   const SCHEDULE = core.SCHEDULE_CATEGORY;
   const HANDOVER = core.HANDOVER_CATEGORY;
   const MEMO_CATEGORIES = core.MEMO_CATEGORIES;
+  const TEMPLATE = core.TEMPLATE_CATEGORY;
+  const BULLET = /^\s*(?:[-*•▢☐□☑✔]|\d+[.)])\s*/;
   // Department (Supabase backend): rotating = 24h shifts with the day changing at 09:00; office departments use plain dates.
   let rotating = true,
     deptName = '';
@@ -17,6 +19,7 @@
   }
   const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
   const MAX_VISIBLE_CHIPS = 3;
+  let calMode = getSetting('calMode') === 'week' ? 'week' : 'month';
   let calendarMonth = monthOf(todayKey()),
     selectedDay = todayKey(),
     lastToday = selectedDay,
@@ -272,7 +275,7 @@
   }
   function render() {
     // Calendar schedules and handover items live in the same revision store but never appear on the memo board (except in the trash).
-    const memos = notes.filter(n => n.category !== SCHEDULE && n.category !== HANDOVER);
+    const memos = notes.filter(n => n.category !== SCHEDULE && n.category !== HANDOVER && n.category !== TEMPLATE);
     const active = memos.filter(n => !n.deleted);
     $('stat-total').textContent = active.length;
     $('nav-total').textContent = active.length;
@@ -383,6 +386,7 @@
   }
   function setEditorMode(schedule, handover = false) {
     $('category-field').hidden = handover;
+    $('assignee-field').hidden = !handover;
     $('memo-fields').hidden = schedule;
     $('schedule-fields').hidden = !schedule;
     $('note-pinned').closest('label').hidden = schedule;
@@ -421,6 +425,7 @@
     $('editor-title').textContent = (schedule ? '일정 ' : handover ? '인수인계 ' : '메모 ') + (note ? '수정' : '추가');
     $('note-title').value = note?.title || options.title || '';
     $('note-content').value = note?.content || '';
+    $('note-assignee').value = note?.assignee || options.assignee || '';
     if (schedule) {
       $('schedule-kind').value = note?.kind || core.SCHEDULE_KINDS[0];
       $('schedule-date').value = note?.date || options.date || selectedDay;
@@ -505,7 +510,7 @@
       if ($('schedule-end').value && $('schedule-end').value !== note.date) note.endDate = $('schedule-end').value;
       return note;
     }
-    return {
+    const note = {
       title: $('note-title').value.trim(),
       content: $('note-content').value,
       category: editing.handover ? HANDOVER : $('note-category').value,
@@ -514,6 +519,9 @@
       deleted,
       author,
     };
+    // The person in charge is optional and only exists on handover items; an empty box removes it.
+    if (editing.handover && $('note-assignee').value.trim()) note.assignee = $('note-assignee').value.trim();
+    return note;
   }
   function scheduleError() {
     const start = $('schedule-date').value,
@@ -551,7 +559,7 @@
   // Everything the editor can change, to tell real edits from an untouched form.
   function editorSnapshot() {
     return JSON.stringify(
-      ['note-title', 'note-content', 'note-category', 'note-status', 'schedule-kind', 'schedule-date', 'schedule-end']
+      ['note-title', 'note-content', 'note-category', 'note-status', 'note-assignee', 'schedule-kind', 'schedule-date', 'schedule-end']
         .map(id => $(id).value)
         .concat($('note-pinned').checked),
     );
@@ -685,6 +693,7 @@
       status: note.status,
       pinned: note.pinned,
       deleted: note.deleted,
+      assignee: note.assignee,
     };
   }
   // A quick change (check, star) is applied on top of the freshest revision, so it never fails because someone else saved first.
@@ -722,31 +731,53 @@
     handoverBusy = false;
     if (!ok) renderHandover();
   }
-  async function addHandover(lines) {
-    if (!handoverWritable()) return;
-    const clean = lines.map(line => line.replace(/^\s*(?:[-*•▢☐□☑✔]|\d+[.)])\s*/, '').trim()).filter(Boolean);
-    if (!clean.length) return;
-    if (clean.length > 20) return toast('한 번에 20개까지 추가할 수 있습니다.');
-    if (clean.some(line => line.length > 120)) return toast('항목은 120자까지 쓸 수 있습니다. 긴 내용은 "자세히"에 적어 주세요.');
+  // "@홍길동 펌프 점검" puts the person in charge in front of the text; bullets and numbers are removed.
+  function parseHandoverLine(line) {
+    if (typeof line !== 'string') return { title: String(line.title || '').trim(), assignee: line.assignee || '' };
+    let title = line.replace(BULLET, '').trim(),
+      assignee = '';
+    const match = /^@(\S{1,40})\s+(.+)$/.exec(title);
+    if (match) {
+      assignee = match[1];
+      title = match[2].trim();
+    }
+    return { title, assignee };
+  }
+  async function addHandover(lines, { max = 20, clearInput = true } = {}) {
+    if (!handoverWritable()) return 0;
+    const clean = lines.map(parseHandoverLine).filter(item => item.title);
+    if (!clean.length) return 0;
+    if (clean.length > max) {
+      toast('한 번에 ' + max + '개까지 추가할 수 있습니다.');
+      return 0;
+    }
+    if (clean.some(item => item.title.length > 120)) {
+      toast('항목은 120자까지 쓸 수 있습니다. 긴 내용은 "자세히"에 적어 주세요.');
+      return 0;
+    }
     handoverBusy = true;
     $('ho-submit').disabled = true;
     $('ho-input').disabled = true;
     let added = 0;
     try {
-      for (const title of clean) {
-        await commit(randomId(), '', { title, content: '', category: HANDOVER, status: 'todo', pinned: false, deleted: false }, []);
+      for (const item of clean) {
+        const note = { title: item.title, content: '', category: HANDOVER, status: 'todo', pinned: false, deleted: false };
+        if (item.assignee) note.assignee = item.assignee;
+        await commit(randomId(), '', note, []);
         added++;
       }
-      $('ho-input').value = '';
+      if (clearInput) $('ho-input').value = '';
     } catch (error) {
-      $('ho-input').value = clean.slice(added).join('\n').split('\n')[0];
-      toast(error.message);
+      const next = clean[added];
+      if (clearInput && next) $('ho-input').value = (next.assignee ? '@' + next.assignee + ' ' : '') + next.title;
+      toast(error.message + (added ? ' (' + added + '개는 추가했습니다)' : ''));
     } finally {
       handoverBusy = false;
       $('ho-submit').disabled = false;
       $('ho-input').disabled = false;
-      $('ho-input').focus();
+      if (clearInput) $('ho-input').focus();
     }
+    return added;
   }
   function carryLabel(item) {
     return item.carriedDays > 0 ? '이월 ' + (item.carriedDays + 1) + '일째' : '오늘 작성';
@@ -772,6 +803,8 @@
     if (item.carriedDays > 0 && !item.done) meta.append(el('span', 'ho-carry', carryLabel(item)));
     else if (item.carriedDays > 0) meta.append(el('span', '', '이월 ' + (item.carriedDays + 1) + '일 만에 완료'));
     if (item.state.note.status === 'doing' && !item.done) meta.append(el('span', 'ho-doing', '진행 중'));
+    const owner = item.state.note.assignee;
+    if (owner) meta.append(el('span', 'ho-assignee' + (author && owner === author ? ' mine' : ''), '담당 ' + owner));
     const who = item.done ? item.state.note.author + ' 완료' : item.state.note.author;
     const when = el('time', '', timeLabel(item.state.at));
     when.dateTime = item.state.at;
@@ -789,13 +822,23 @@
       star.disabled = true;
       if (!(await quickChange(note.id, { pinned: !item.pinned }))) renderHandover();
     };
+    const take = el('button', 'ho-icon' + (owner && owner === author ? ' on' : ''));
+    take.type = 'button';
+    take.append(icon('user'));
+    take.title = owner && owner === author ? '담당 해제' : '내가 맡기';
+    take.setAttribute('aria-label', note.title + ' ' + take.title);
+    take.disabled = !editable || !author;
+    take.onclick = async () => {
+      take.disabled = true;
+      if (!(await quickChange(note.id, { assignee: owner && owner === author ? undefined : author }))) renderHandover();
+    };
     const history = el('button', 'ho-icon');
     history.type = 'button';
     history.append(icon('clock'));
     history.title = '수정 기록';
     history.setAttribute('aria-label', note.title + ' 수정 기록');
     history.onclick = () => showHistory(note.id);
-    li.append(box, text, star, history);
+    li.append(box, text, take, star, history);
     return li;
   }
   function renderHandover() {
@@ -804,7 +847,8 @@
     const day = handoverDay,
       isToday = day === today,
       editable = isToday,
-      items = core.handoverOn(notes, day, rotating),
+      mineOnly = $('ho-mine').checked && !!author,
+      items = core.handoverOn(notes, day, rotating).filter(item => !mineOnly || item.state.note.assignee === author),
       open = items.filter(item => !item.done),
       done = items.filter(item => item.done);
     $('ho-title').textContent = dayLabel(day, true) + (isToday ? ' · 오늘' : '');
@@ -861,6 +905,11 @@
     handoverDay = next;
     renderHandover();
   }
+  $('ho-mine').checked = getSetting('hoMine') === '1';
+  $('ho-mine').onchange = () => {
+    setSetting('hoMine', $('ho-mine').checked ? '1' : '');
+    renderHandover();
+  };
   $('ho-prev').onclick = () => moveHandoverDay(-1);
   $('ho-next').onclick = () => moveHandoverDay(1);
   $('ho-today').onclick = () => {
@@ -893,6 +942,7 @@
       line = item =>
         (item.done ? '☑ ' : '☐ ') +
         item.note.title +
+        (item.state.note.assignee ? ' [담당 ' + item.state.note.assignee + ']' : '') +
         (item.carriedDays > 0 && !item.done ? ' (' + carryLabel(item) + ')' : '') +
         (item.note.content ? '\n    ' + item.note.content.replace(/\n/g, '\n    ') : '');
     const open = items.filter(item => !item.done),
@@ -908,6 +958,127 @@
     ].join('\n');
     copyText(text, '인수인계 목록을 복사했습니다.');
   };
+
+  // ===== 자주 쓰는 목록 (템플릿) =====
+  // A template is a saved note (category 템플릿): the name is the title, one handover item per line is the content.
+  let editingTemplate = null;
+  const normalizeTitle = text => text.toLocaleLowerCase('ko-KR').replace(/\s+/g, ' ').trim();
+  // One item per line; bullets are removed and a line that repeats an earlier one (ignoring case and spacing) is dropped.
+  const templateLines = content => {
+    const seen = new Set();
+    return content
+      .split(/\r?\n/)
+      .map(line => line.replace(BULLET, '').trim())
+      .filter(line => line && !seen.has(normalizeTitle(line)) && seen.add(normalizeTitle(line)));
+  };
+  function templateList() {
+    return notes.filter(n => n.category === TEMPLATE && !n.deleted).sort((a, b) => a.title.localeCompare(b.title, 'ko'));
+  }
+  function renderTemplates() {
+    const list = templateList();
+    $('tpl-list').replaceChildren(
+      ...(list.length
+        ? list.map(note => {
+            const lines = templateLines(note.content);
+            const card = el('div', 'tpl-card');
+            const info = el('div', 'tpl-info');
+            info.append(
+              el('strong', '', note.title),
+              el('small', '', lines.length + '개 항목 · ' + lines.slice(0, 3).join(', ') + (lines.length > 3 ? ' …' : '')),
+            );
+            const load = el('button', 'primary', '오늘 목록에 불러오기');
+            load.type = 'button';
+            load.onclick = () => loadTemplate(note, load);
+            const edit = el('button', 'secondary', '수정');
+            edit.type = 'button';
+            edit.onclick = () => showTemplateForm(note);
+            card.append(info, load, edit);
+            return card;
+          })
+        : [el('p', 'ho-empty', synced ? '저장한 목록이 없습니다. “새 목록 만들기”로 시작하세요.' : '공유 저장 연결 후 표시됩니다.')]),
+    );
+  }
+  function showTemplateForm(note) {
+    editingTemplate = note ? note.id : null;
+    $('tpl-name').value = note?.title || '';
+    $('tpl-lines').value = note ? templateLines(note.content).join('\n') : '';
+    $('tpl-delete').hidden = !note;
+    $('tpl-message').hidden = true;
+    $('tpl-list-view').hidden = true;
+    $('tpl-edit').hidden = false;
+    $('tpl-name').focus();
+  }
+  function showTemplateList() {
+    editingTemplate = null;
+    $('tpl-edit').hidden = true;
+    $('tpl-list-view').hidden = false;
+    $('tpl-message').hidden = true;
+    renderTemplates();
+  }
+  async function loadTemplate(note, button) {
+    if (!handoverWritable()) return;
+    const have = new Set(core.handoverOn(notes, todayKey(), rotating).map(item => normalizeTitle(item.state.note.title)));
+    const lines = templateLines(note.content);
+    const fresh = lines.filter(line => !have.has(normalizeTitle(line)));
+    if (!fresh.length)
+      return showMessage('tpl-message', '“' + note.title + '”의 항목이 오늘 목록에 모두 있어 새로 추가할 것이 없습니다.', true);
+    button.disabled = true;
+    showMessage('tpl-message', '불러오는 중… (' + fresh.length + '개)', true);
+    const added = await addHandover(fresh, { max: 25, clearInput: false });
+    button.disabled = false;
+    if (!added) return showMessage('tpl-message', '항목을 추가하지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
+    $('tpl-dialog').close();
+    handoverDay = todayKey();
+    if (view !== 'handover') setView('handover');
+    else renderHandover();
+    toast(
+      '“' +
+        note.title +
+        '”에서 ' +
+        added +
+        '개를 불러왔습니다' +
+        (lines.length - fresh.length ? ' (이미 있는 ' + (lines.length - fresh.length) + '개는 건너뜀)' : '') +
+        '.',
+    );
+  }
+  $('ho-templates').onclick = () => {
+    showTemplateList();
+    $('tpl-dialog').showModal();
+  };
+  $('tpl-close').onclick = () => $('tpl-dialog').close();
+  $('tpl-new').onclick = () => showTemplateForm(null);
+  $('tpl-cancel').onclick = showTemplateList;
+  $('tpl-edit').onsubmit = async event => {
+    event.preventDefault();
+    if (!handoverWritable()) return;
+    const name = $('tpl-name').value.trim(),
+      lines = templateLines($('tpl-lines').value);
+    if (!name) return showMessage('tpl-message', '목록 이름을 입력해 주세요.');
+    if (!lines.length) return showMessage('tpl-message', '항목을 한 줄 이상 적어 주세요.');
+    if (lines.length > 25) return showMessage('tpl-message', '한 목록에는 항목을 25개까지 넣을 수 있습니다.');
+    if (lines.some(line => line.length > 120)) return showMessage('tpl-message', '항목은 한 줄에 120자까지 쓸 수 있습니다.');
+    const button = $('tpl-save');
+    button.disabled = true;
+    try {
+      const content = lines.join('\n');
+      if (editingTemplate) {
+        if (!(await quickChange(editingTemplate, { title: name, content }))) throw new Error('저장하지 못했습니다. 다시 시도해 주세요.');
+      } else {
+        await commit(randomId(), '', { title: name, content, category: TEMPLATE, status: 'todo', pinned: false, deleted: false }, []);
+      }
+      showTemplateList();
+      showMessage('tpl-message', '“' + name + '” 목록을 저장했습니다.', true);
+    } catch (error) {
+      showMessage('tpl-message', error.message);
+    }
+    button.disabled = false;
+  };
+  twoStep($('tpl-delete'), '정말 삭제', async () => {
+    if (editingTemplate && (await quickChange(editingTemplate, { deleted: true }))) {
+      showTemplateList();
+      showMessage('tpl-message', '목록을 삭제했습니다. 휴지통의 수정 기록에서 복구할 수 있습니다.', true);
+    }
+  });
 
   // ===== 파일 주고받기 =====
   const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -1196,8 +1367,26 @@
     renderCalendar();
   }
   function shiftMonth(delta) {
+    if (calMode === 'week') {
+      const next = core.addDays(selectedDay, delta * 7);
+      if (next < '2000-01-01' || next > '2099-12-31') return;
+      selectedDay = next;
+      calendarMonth = monthOf(next);
+      return renderCalendar();
+    }
     const index = calendarMonth.year * 12 + calendarMonth.month - 1 + delta;
     showMonth(Math.floor(index / 12), (index % 12) + 1);
+  }
+  // The seven days (Sunday first) of the week that contains the given day.
+  function weekDays(day) {
+    const start = core.addDays(day, -new Date(day + 'T00:00:00Z').getUTCDay());
+    return Array.from({ length: 7 }, (_, i) => core.addDays(start, i));
+  }
+  function setCalMode(mode) {
+    calMode = mode;
+    setSetting('calMode', mode);
+    if (mode === 'month') calendarMonth = monthOf(selectedDay);
+    renderCalendar();
   }
   function schedulesOn(day) {
     return notes
@@ -1221,20 +1410,43 @@
   }
   function renderCalendar() {
     const { year, month } = calendarMonth,
+      week = calMode === 'week',
       prefix = String(year).padStart(4, '0') + '-' + String(month).padStart(2, '0'),
-      today = todayKey();
-    $('cal-title').textContent = year + '년 ' + month + '월';
+      today = todayKey(),
+      days = week ? weekDays(selectedDay) : core.monthGrid(year, month);
+    if (week) {
+      const first = days[0],
+        last = days[6];
+      $('cal-title').textContent =
+        Number(first.slice(0, 4)) +
+        '년 ' +
+        Number(first.slice(5, 7)) +
+        '월 ' +
+        Number(first.slice(8)) +
+        '일 ~ ' +
+        (first.slice(5, 7) === last.slice(5, 7) ? '' : Number(last.slice(5, 7)) + '월 ') +
+        Number(last.slice(8)) +
+        '일';
+      $('cal-prev').disabled = first <= '2000-01-07';
+      $('cal-next').disabled = last >= '2099-12-24';
+    } else {
+      $('cal-title').textContent = year + '년 ' + month + '월';
+      $('cal-prev').disabled = year === 2000 && month === 1;
+      $('cal-next').disabled = year === 2099 && month === 12;
+    }
     $('cal-month').value = prefix;
-    $('cal-prev').disabled = year === 2000 && month === 1;
-    $('cal-next').disabled = year === 2099 && month === 12;
+    document.querySelector('.cal-jump').hidden = week;
+    document.querySelectorAll('[data-calmode]').forEach(b => b.classList.toggle('active', b.dataset.calmode === calMode));
+    $('cal-grid').className = 'calendar-grid' + (week ? ' week' : '');
+    document.querySelector('.calendar-scroll').classList.toggle('week', week);
     $('cal-grid').replaceChildren(
-      ...core.monthGrid(year, month).map(day => {
+      ...days.map(day => {
         const events = schedulesOn(day),
           weekday = new Date(day + 'T00:00:00Z').getUTCDay();
         const cell = el(
           'div',
           'cal-cell' +
-            (day.startsWith(prefix) ? '' : ' outside') +
+            (week || day.startsWith(prefix) ? '' : ' outside') +
             (day === today ? ' today' : '') +
             (day === selectedDay ? ' selected' : '') +
             (weekday === 0 ? ' sun' : weekday === 6 ? ' sat' : ''),
@@ -1242,11 +1454,11 @@
         cell.setAttribute('role', 'gridcell');
         cell.onclick = () => {
           selectedDay = day;
-          if (!day.startsWith(prefix)) calendarMonth = monthOf(day);
+          if (!week && !day.startsWith(prefix)) calendarMonth = monthOf(day);
           renderCalendar();
         };
         const head = el('div', 'cal-cell-head');
-        const number = el('button', 'cal-date', String(Number(day.slice(8))));
+        const number = el('button', 'cal-date', week ? Number(day.slice(5, 7)) + '/' + Number(day.slice(8)) : String(Number(day.slice(8))));
         number.setAttribute(
           'aria-label',
           dayLabel(day, true) +
@@ -1255,10 +1467,11 @@
         );
         number.setAttribute('aria-pressed', String(day === selectedDay));
         head.append(number);
+        if (week) head.append(el('span', 'cal-wd', WEEKDAYS[weekday] + '요일'));
         if (rotating) head.append(teamBadge(day));
         cell.append(head);
         const chips = el('div', 'cal-chips');
-        for (const note of events.slice(0, MAX_VISIBLE_CHIPS)) {
+        for (const note of events.slice(0, week ? events.length : MAX_VISIBLE_CHIPS)) {
           const chip = el('button', 'cal-chip', note.title);
           chip.dataset.kind = note.kind;
           chip.title = note.kind + ' · ' + note.title + ' · ' + note.author;
@@ -1269,7 +1482,8 @@
           };
           chips.append(chip);
         }
-        if (events.length > MAX_VISIBLE_CHIPS) chips.append(el('span', 'cal-more', '+' + (events.length - MAX_VISIBLE_CHIPS) + '개'));
+        if (!week && events.length > MAX_VISIBLE_CHIPS)
+          chips.append(el('span', 'cal-more', '+' + (events.length - MAX_VISIBLE_CHIPS) + '개'));
         const dots = el('div', 'cal-dots');
         for (const note of events.slice(0, 4)) {
           const dot = el('span', 'cal-dot');
@@ -1339,6 +1553,7 @@
           ? $('file-pick').click()
           : openEditor();
   $('empty-new').onclick = () => openEditor();
+  document.querySelectorAll('[data-calmode]').forEach(b => (b.onclick = () => setCalMode(b.dataset.calmode)));
   $('cal-prev').onclick = () => shiftMonth(-1);
   $('cal-next').onclick = () => shiftMonth(1);
   $('cal-today').onclick = () => {

@@ -202,3 +202,27 @@ button.armed svg{color:#fff}
 .admin-code-box code{font-size:16px;font-weight:700;letter-spacing:.5px;background:#fff;border:1px solid #ecd9a3;border-radius:8px;padding:8px 12px;word-break:break-all}
 .admin-code-box p{flex:1 1 100%;margin:0;font-size:11px;color:#8a6d1f;line-height:1.7}
 @media(max-width:680px){.admin-fields,.admin-new{grid-template-columns:1fr}}
+/* ===== 담당자 · 자주 쓰는 목록 · 주간 보기 ===== */
+.ho-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.ho-mine{margin:0;font-size:12px;white-space:nowrap}
+.ho-assignee{background:#e9eefb;color:#3f5a9a;border-radius:5px;padding:1px 7px;font-weight:600}
+.ho-assignee.mine{background:#e3f0e8;color:#3f7254}
+.ho-item{grid-template-columns:auto 1fr auto auto auto}
+.tpl-card{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;background:#fff}
+.tpl-info strong{display:block;font-size:14px}
+.tpl-info small{display:block;color:#7b886c;font-size:11px;margin-top:4px;line-height:1.6;overflow-wrap:anywhere}
+.tpl-card .primary,.tpl-card .secondary{font-size:11px;min-height:36px;padding:8px 12px}
+.calendar-nav .tabs{margin-left:4px}
+.calendar-grid.week .cal-cell{min-height:220px}
+.calendar-grid.week .cal-chip{white-space:normal;line-height:1.5}
+.calendar-grid.week .cal-cell-head{flex-wrap:wrap}
+.cal-wd{font-size:11px;color:#7b886c}
+@media(max-width:680px){
+  .tpl-card{grid-template-columns:1fr}
+  .ho-item{grid-template-columns:auto 1fr auto auto}.ho-item .ho-icon:nth-of-type(1){grid-column:3}
+  .calendar-scroll.week .calendar-weekdays{display:none}
+  .calendar-grid.week{grid-template-columns:1fr;border-top:1px solid var(--line);border-radius:12px}
+  .calendar-grid.week .cal-cell{min-height:0;border-right:0}
+  .calendar-grid.week .cal-chips{display:flex}.calendar-grid.week .cal-dots{display:none}
+  .calendar-grid.week .cal-cell-head{flex-direction:row;align-items:center}
+}

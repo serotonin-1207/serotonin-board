@@ -27,6 +27,7 @@
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="10" cy="18" r="2"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
   <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V9zM14 3v6h6"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0-4 4m4-4 4 4M4 15v3a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-3"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12m0 0-4-4m4 4 4-4M4 19h16"/></symbol>
@@ -103,7 +104,7 @@
             <button class="secondary" id="ho-today">오늘</button>
             <label class="cal-jump">날짜 선택<input type="date" id="ho-date" min="2000-01-01" max="2099-12-31"></label>
           </div>
-          <button class="secondary" id="ho-copy">목록 복사</button>
+          <div class="ho-tools"><label class="checkbox-label ho-mine"><input type="checkbox" id="ho-mine">내 담당만</label><button class="secondary" id="ho-templates" type="button">자주 쓰는 목록</button><button class="secondary" id="ho-copy">목록 복사</button></div>
         </div>
         <p class="ho-sub" id="ho-sub"></p>
         <div class="ho-progress" aria-live="polite"><div class="ho-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="ho-bar"><span id="ho-bar-fill"></span></div><strong id="ho-count"></strong></div>
@@ -125,6 +126,7 @@
             <h2 id="cal-title" aria-live="polite">2026년 10월</h2>
             <button class="secondary icon-button" id="cal-next" aria-label="다음 달"><svg><use href="#i-chevron-right"/></svg></button>
             <button class="secondary" id="cal-today">오늘</button>
+            <div class="tabs" id="cal-mode" role="group" aria-label="보기 방식"><button class="tab active" type="button" data-calmode="month">월간</button><button class="tab" type="button" data-calmode="week">주간</button></div>
             <label class="cal-jump">날짜 선택<input type="month" id="cal-month" min="2000-01" max="2099-12"></label>
           </div>
         </div>
@@ -153,6 +155,7 @@
       <label>일정 종류<select id="schedule-kind"><option>휴가</option><option>교육</option><option>교대</option><option>훈련</option><option>기타</option></select></label>
       <div class="form-columns"><label>시작일<input type="date" id="schedule-date" min="2000-01-01" max="2099-12-31"></label><label>종료일 (하루면 비워 두세요)<input type="date" id="schedule-end" min="2000-01-01" max="2099-12-31"></label></div>
     </div>
+    <label id="assignee-field" hidden>담당자 (선택)<input id="note-assignee" maxlength="40" placeholder="예: 홍길동" autocomplete="off"></label>
     <label>내용<textarea id="note-content" maxlength="10000" rows="8" placeholder="전달할 내용, 확인할 사항, 다음에 할 일을 적어 주세요. Ctrl+Enter로 저장할 수 있어요."></textarea></label>
     <label class="checkbox-label"><input type="checkbox" id="note-pinned">중요 메모로 상단에 고정</label>
     <div class="editor-meta"><span id="editor-author"></span><span id="editor-history-label"></span></div>
@@ -217,6 +220,20 @@
     <div id="admin-members"></div>
   </div>
   <p class="form-message" id="admin-message" role="status" hidden></p>
+</dialog>
+<dialog id="tpl-dialog" class="settings-dialog">
+  <div class="dialog-heading"><div><p class="eyebrow">TEMPLATES</p><h2>자주 쓰는 목록</h2></div><button class="close-button" id="tpl-close" aria-label="닫기">×</button></div>
+  <div id="tpl-list-view">
+    <p class="settings-intro">매일 반복하는 점검 항목을 목록으로 저장해 두고 한 번에 불러옵니다. 오늘 목록에 이미 있는 항목은 건너뜁니다.</p>
+    <div id="tpl-list"></div>
+    <div class="dialog-actions"><span class="action-spacer"></span><button class="primary" type="button" id="tpl-new"><svg><use href="#i-plus"/></svg>새 목록 만들기</button></div>
+  </div>
+  <form id="tpl-edit" hidden>
+    <label>목록 이름<input id="tpl-name" maxlength="120" placeholder="예: 야간 점검" autocomplete="off" required></label>
+    <label>항목 (한 줄에 하나, 최대 25개)<textarea id="tpl-lines" rows="9" maxlength="4000" placeholder="펌프 압력 확인&#10;무전기 충전&#10;차량 주유"></textarea></label>
+    <div class="dialog-actions"><button class="danger-text" type="button" id="tpl-delete" hidden><svg><use href="#i-trash"/></svg>목록 삭제</button><span class="action-spacer"></span><button class="secondary" type="button" id="tpl-cancel">취소</button><button class="primary" type="submit" id="tpl-save">저장</button></div>
+  </form>
+  <p class="form-message" id="tpl-message" role="status" hidden></p>
 </dialog>
 <dialog id="history-dialog" class="history-dialog"><div class="dialog-heading"><div><p class="eyebrow">NOTE HISTORY</p><h2>수정 기록</h2></div><button class="close-button" id="history-close" aria-label="닫기">×</button></div><p class="history-intro" id="history-intro"></p><div id="history-list"></div></dialog>
 <div id="toast" class="toast" role="status" hidden></div>

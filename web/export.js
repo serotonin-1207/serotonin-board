@@ -48,6 +48,7 @@
       '수정 횟수',
       '완료 시각',
       '완료한 사람',
+      '담당자',
     ];
     const rows = [...notes]
       .sort((a, b) => a.history[0].at.localeCompare(b.history[0].at))
@@ -69,6 +70,7 @@
           note.history.length,
           done ? kst(done.at) : '',
           done ? done.note.author : '',
+          note.assignee || '',
         ];
       });
     return toCsv(header, rows);
@@ -88,6 +90,7 @@
       '일정 종류',
       '일정 시작일',
       '일정 종료일',
+      '담당자',
       '계정 구분',
       '항목 ID',
       '기록 ID',
@@ -107,6 +110,7 @@
         e.note.kind || '',
         e.note.date || '',
         e.note.endDate || '',
+        e.note.assignee || '',
         e.actor ? e.actor.kind : '',
         e.noteId,
         e.id,
@@ -130,6 +134,7 @@
       '작성일',
       '작성자',
       '마지막 처리자',
+      '담당자',
       '중요',
       '메모',
     ];
@@ -149,6 +154,7 @@
             item.createdDay,
             item.note.history[0].note.author,
             note.author,
+            note.assignee || '',
             item.pinned ? '중요' : '',
             note.content,
           ]);

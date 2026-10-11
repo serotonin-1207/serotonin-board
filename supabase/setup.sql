@@ -302,17 +302,23 @@ begin
     or jsonb_typeof(input->'note') is distinct from 'object'
   then raise exception 'Invalid event'; end if;
   if jsonb_array_length(input->'parents') > 100 then raise exception 'Too many parents'; end if;
-  if ((input->'note') - array['title','content','author','category','status','pinned','deleted','kind','date','endDate']) <> '{}'::jsonb
+  if ((input->'note') - array['title','content','author','category','status','pinned','deleted','kind','date','endDate','assignee']) <> '{}'::jsonb
     or jsonb_typeof(input#>'{note,title}') is distinct from 'string'
     or length(btrim(input#>>'{note,title}')) not between 1 and 120
     or jsonb_typeof(input#>'{note,content}') is distinct from 'string'
     or length(input#>>'{note,content}') > 10000
     or jsonb_typeof(input#>'{note,author}') is distinct from 'string'
     or length(btrim(input#>>'{note,author}')) not between 1 and 40
-    or coalesce(input#>>'{note,category}','') not in ('인수인계','공지사항','업무 메모','일정')
+    or coalesce(input#>>'{note,category}','') not in ('인수인계','공지사항','업무 메모','일정','템플릿')
     or coalesce(input#>>'{note,status}','') not in ('todo','doing','done')
     or jsonb_typeof(input#>'{note,pinned}') is distinct from 'boolean'
     or jsonb_typeof(input#>'{note,deleted}') is distinct from 'boolean'
+  then raise exception 'Invalid note'; end if;
+  -- Only handover items may name a person in charge.
+  if (input->'note') ? 'assignee' and (
+      input#>>'{note,category}' <> '인수인계'
+      or jsonb_typeof(input#>'{note,assignee}') is distinct from 'string'
+      or length(btrim(input#>>'{note,assignee}')) not between 1 and 40)
   then raise exception 'Invalid note'; end if;
   if input#>>'{note,category}' = '일정' then
     if jsonb_typeof(input#>'{note,date}') is distinct from 'string'
