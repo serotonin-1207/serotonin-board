@@ -20,7 +20,7 @@ async function telegram(method: string, body: Record<string, unknown> = {}) {
   const token = Deno.env.get('TELEGRAM_BOT_TOKEN');
   if (!token) return { ok: false, error_code: 0, description: 'TELEGRAM_BOT_TOKEN is not set' };
   try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    const response = await fetch('https://api.telegram.org/bot' + token + '/' + method, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
