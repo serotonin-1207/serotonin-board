@@ -226,3 +226,8 @@ button.armed svg{color:#fff}
   .calendar-grid.week .cal-chips{display:flex}.calendar-grid.week .cal-dots{display:none}
   .calendar-grid.week .cal-cell-head{flex-direction:row;align-items:center}
 }
+/* ===== 텔레그램 일정 알림 (관리) ===== */
+.tg-fields{display:grid;grid-template-columns:repeat(3,auto);gap:10px 16px;align-items:end;justify-content:start}
+.tg-fields input[type=time]{display:block;margin-top:4px;border:1px solid #e1e6d9;border-radius:9px;padding:8px 10px;background:#fcfdf9;font-size:13px}
+.tg-code{display:block;margin:0 0 10px;padding:10px 12px;background:#f1f5ea;border-radius:9px;font-size:13px;overflow-wrap:anywhere;user-select:all}
+@media(max-width:680px){.tg-fields{grid-template-columns:1fr 1fr}}

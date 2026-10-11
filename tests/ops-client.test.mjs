@@ -60,3 +60,33 @@ test('restore sends the batch to the server function and reports its answer', as
   broken.session = async () => ({ id: 'u' });
   await assert.rejects(broken.restoreEvents([]), /이전 수정 기록이 맞지 않습니다/);
 });
+
+test('telegram settings are sent as the database expects, and server-function failures become readable messages', async () => {
+  const calls = [];
+  const storage = make({
+    rpc: async (name, args) => (calls.push([name, args]), { data: true, error: null }),
+    functions: { invoke: async (name, options) => (calls.push([name, options]), { data: { ok: true, username: 'x_bot' }, error: null }) },
+  });
+  storage.session = async () => ({ id: 'u' });
+  await storage.adminTelegramSave('d1', { enabled: true, morning: true, evening: false, changes: true, morningMin: 540, eveningMin: 1080 });
+  await storage.adminTelegramLinkStart('d1');
+  assert.deepEqual(calls[0], [
+    'serotonin_admin_telegram_save',
+    { p_dept: 'd1', p_enabled: true, p_morning: true, p_evening: false, p_changes: true, p_morning_min: 540, p_evening_min: 1080 },
+  ]);
+  assert.deepEqual(calls[1], ['serotonin_admin_telegram_link_start', { p_dept: 'd1' }]);
+  assert.equal((await storage.telegramCall('info')).username, 'x_bot');
+  assert.deepEqual(calls[2], ['telegram-notify', { body: { action: 'info', dept: undefined } }]);
+  for (const [status, pattern] of [
+    [404, /설치되지 않았습니다/],
+    [403, /관리자 권한/],
+    [500, /부르지 못했습니다/],
+  ]) {
+    const failing = make({ functions: { invoke: async () => ({ data: null, error: { context: { status } } }) } });
+    failing.session = async () => ({ id: 'u' });
+    await assert.rejects(failing.telegramCall('info'), pattern);
+  }
+  const unlinked = make({ rpc: async () => ({ data: null, error: { message: 'Telegram chat not linked' } }) });
+  unlinked.session = async () => ({ id: 'u' });
+  await assert.rejects(unlinked.adminTelegramSave('d1', {}), /먼저 텔레그램 대화방을 연결/);
+});

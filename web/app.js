@@ -1961,6 +1961,7 @@
     filter.replaceChildren(new Option('모든 부서', ''), ...depts.map(d => new Option(d.name, d.id)));
     filter.value = depts.some(d => d.id === kept) ? kept : '';
     renderAdminMembers();
+    renderTelegram().catch(error => showMessage('admin-message', error.message));
   }
   function renderAdminMembers() {
     const names = new Map(adminData.depts.map(d => [d.id, d.name])),
@@ -1991,6 +1992,155 @@
       }),
     );
   }
+  // ===== 텔레그램 일정 알림 (관리) =====
+  let tgBotName = '';
+  const tgCodes = new Map(); // one-time link codes, shown only until the screen is closed
+  const minText = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  const minValue = text => {
+    const [h, m] = text.split(':').map(Number);
+    return h * 60 + m;
+  };
+  async function checkBot() {
+    const info = await storage.telegramCall('info');
+    tgBotName = info?.ok ? info.username : '';
+    $('tg-bot').textContent = info?.ok
+      ? '봇 @' + info.username + ' 이(가) 연결되어 있습니다.'
+      : info?.configured === false
+        ? '봇 토큰이 아직 등록되지 않았습니다. 안내문의 토큰 등록 단계를 확인해 주세요.'
+        : '봇을 확인하지 못했습니다: ' + (info?.message || '알 수 없는 오류');
+  }
+  async function renderTelegram() {
+    const list = await storage.adminTelegramList();
+    $('tg-depts').replaceChildren(
+      ...list.map(d => {
+        const card = el('div', 'admin-dept');
+        const state = d.error
+          ? '최근 오류: ' + d.error
+          : !d.linked
+            ? '대화방이 연결되지 않았습니다.'
+            : d.enabled
+              ? '알림을 보내는 중입니다.'
+              : '대화방은 연결되었고 알림은 꺼져 있습니다.';
+        card.append(el('strong', '', d.name), el('p', 'admin-info', state));
+        const actions = el('div', 'admin-actions');
+        const button = (label, onClick, two) => {
+          const b = el('button', 'secondary', label);
+          b.type = 'button';
+          const safe = async () => {
+            b.disabled = true;
+            try {
+              await onClick();
+            } catch (error) {
+              showMessage('admin-message', error.message);
+            }
+            b.disabled = false;
+          };
+          if (two) twoStep(b, two, safe);
+          else b.onclick = safe;
+          return b;
+        };
+        if (!d.linked) {
+          const code = tgCodes.get(d.id);
+          if (code) {
+            const command = '/link' + (tgBotName ? '@' + tgBotName : '') + ' ' + code;
+            card.append(
+              el('p', 'admin-info', '텔레그램 대화방에서 아래 문장을 그대로 보낸 뒤 “연결 확인”을 누르세요. (15분 안에)'),
+              el('code', 'tg-code', command),
+            );
+          }
+          actions.append(
+            button(code ? '새 코드 받기' : '대화방 연결', async () => {
+              tgCodes.set(d.id, (await storage.adminTelegramLinkStart(d.id)).code);
+              await renderTelegram();
+            }),
+          );
+          if (code)
+            actions.append(
+              button('연결 확인', async () => {
+                const result = await storage.telegramCall('link-check');
+                if (!result?.ok) throw new Error(result?.message || '확인하지 못했습니다.');
+                if (result.linked.includes(d.id)) {
+                  tgCodes.delete(d.id);
+                  showMessage('admin-message', '“' + d.name + '” 대화방이 연결되었습니다. 이제 알림을 켜 주세요.', true);
+                } else
+                  showMessage('admin-message', '아직 연결 문장을 찾지 못했습니다. 대화방에 보냈는지, 봇이 그 방에 있는지 확인해 주세요.');
+                await renderTelegram();
+              }),
+            );
+        } else {
+          const on = el('input');
+          on.type = 'checkbox';
+          on.checked = d.enabled;
+          const box = (label, checked) => {
+            const input = el('input');
+            input.type = 'checkbox';
+            input.checked = checked;
+            const wrap = el('label', 'checkbox-label');
+            wrap.append(input, document.createTextNode(label));
+            return [input, wrap];
+          };
+          const onLabel = el('label', 'checkbox-label');
+          onLabel.append(on, document.createTextNode('알림 켜기'));
+          const [morning, morningLabel] = box('아침 요약', d.morning);
+          const [evening, eveningLabel] = box('저녁 예고', d.evening);
+          const [changes, changesLabel] = box('일정 변경 알림', d.changes);
+          const time = (label, value) => {
+            const input = el('input');
+            input.type = 'time';
+            input.value = minText(value);
+            const wrap = el('label', '', label);
+            wrap.append(input);
+            return [input, wrap];
+          };
+          const [morningAt, morningAtLabel] = time('아침 시각', d.morningMin);
+          const [eveningAt, eveningAtLabel] = time('저녁 시각', d.eveningMin);
+          const fields = el('div', 'tg-fields');
+          fields.append(onLabel, morningLabel, morningAtLabel, eveningLabel, eveningAtLabel, changesLabel);
+          card.append(fields);
+          actions.append(
+            button('저장', async () => {
+              if (!morningAt.value || !eveningAt.value) throw new Error('알림 시각을 입력해 주세요.');
+              await storage.adminTelegramSave(d.id, {
+                enabled: on.checked,
+                morning: morning.checked,
+                evening: evening.checked,
+                changes: changes.checked,
+                morningMin: minValue(morningAt.value),
+                eveningMin: minValue(eveningAt.value),
+              });
+              showMessage('admin-message', '“' + d.name + '” 알림 설정을 저장했습니다.', true);
+              await renderTelegram();
+            }),
+            button('시험 메시지', async () => {
+              const result = await storage.telegramCall('test', d.id);
+              showMessage(
+                'admin-message',
+                result?.ok ? '시험 메시지를 보냈습니다. 대화방을 확인해 주세요.' : result?.message || '보내지 못했습니다.',
+                result?.ok === true,
+              );
+            }),
+            button(
+              '연결 해제',
+              async () => {
+                await storage.adminTelegramUnlink(d.id);
+                await renderTelegram();
+              },
+              '정말 연결 해제',
+            ),
+          );
+        }
+        card.append(actions);
+        return card;
+      }),
+    );
+  }
+  $('tg-refresh').onclick = async () => {
+    try {
+      await checkBot();
+    } catch (error) {
+      showMessage('admin-message', error.message);
+    }
+  };
   async function openAdmin() {
     $('admin-message').hidden = true;
     $('admin-code-box').hidden = true;

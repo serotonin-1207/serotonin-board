@@ -282,6 +282,8 @@ export class SupabaseStorage {
       [/requires a parent/, '같은 메모의 다른 처음 기록이 이미 있어 복원할 수 없습니다.'],
       [/revision limit/, '기록 한도(20,000건)에 도달했습니다.'],
       [/Access code required/, '접속 코드 등록이 필요합니다.'],
+      [/Telegram chat not linked/, '먼저 텔레그램 대화방을 연결해 주세요.'],
+      [/Invalid time/, '알림 시각이 올바르지 않습니다.'],
     ];
     for (const [pattern, message] of known) if (pattern.test(text)) return message;
     return text;
@@ -329,6 +331,39 @@ export class SupabaseStorage {
   }
   adminRemoveMember(userId) {
     return this.adminCall('serotonin_admin_member_remove', { p_user: userId });
+  }
+  // ===== Telegram announcements (administrator) =====
+  adminTelegramList() {
+    return this.adminCall('serotonin_admin_telegram_list');
+  }
+  adminTelegramSave(dept, o) {
+    return this.adminCall('serotonin_admin_telegram_save', {
+      p_dept: dept,
+      p_enabled: o.enabled,
+      p_morning: o.morning,
+      p_evening: o.evening,
+      p_changes: o.changes,
+      p_morning_min: o.morningMin,
+      p_evening_min: o.eveningMin,
+    });
+  }
+  adminTelegramLinkStart(dept) {
+    return this.adminCall('serotonin_admin_telegram_link_start', { p_dept: dept });
+  }
+  adminTelegramUnlink(dept) {
+    return this.adminCall('serotonin_admin_telegram_unlink', { p_dept: dept });
+  }
+  // Asks the telegram-notify Edge Function (action: info | link-check | test). The bot token only exists inside that function.
+  async telegramCall(action, dept) {
+    await this.session();
+    const result = await this.client.functions.invoke('telegram-notify', { body: { action, dept } });
+    if (result.error) {
+      const status = result.error.context?.status;
+      if (status === 404) throw new Error('텔레그램 서버 기능이 아직 설치되지 않았습니다. 안내문의 설치 단계를 확인해 주세요.');
+      if (status === 403) throw new Error('관리자 권한이 필요합니다. 관리자 코드를 입력해 주세요.');
+      throw new Error('텔레그램 서버 기능을 부르지 못했습니다.');
+    }
+    return result.data;
   }
   // Cloudflare Turnstile token for anonymous sign-ins, only when the project turned the bot check on (config.turnstileSiteKey).
   async captchaToken() {
