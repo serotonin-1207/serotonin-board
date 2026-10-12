@@ -33,7 +33,7 @@ npm run preview   # 개발용 로컬 미리보기
 1. 무료 Supabase 프로젝트를 만들고 Authentication에서 **Anonymous Sign-Ins**를 켭니다.
 2. SQL Editor에서 `supabase/setup.sql` 전체를 실행합니다(여러 번 실행해도 안전합니다).
 3. 접속 코드를 정해 해시로 등록합니다(`setup.sql` 끝의 `ADMIN STEP`). 코드를 등록하기 전에는 아무도 접속할 수 없습니다.
-4. 프로젝트 주소와 **publishable 키**를 `supabase/public-config.json`에 적고 `npm run build`를 실행합니다.
+4. 프로젝트 주소는 `supabase/public-config.json`에, **publishable 키**는 저장소에 올리지 않는 `supabase/public-config.local.json`(`{"publishableKey": "sb_publishable_..."}`)에 적고 `npm run build`를 실행합니다. GitHub Actions에서는 저장소 변수 `SUPABASE_PUBLISHABLE_KEY`로 넣습니다. 이 키는 원래 웹페이지에 공개되는 값이지만, 공공 GitLab의 비밀 정보 검사(Gitleaks)에 걸리지 않도록 코드에서 뺐습니다.
    - 공개해도 되는 값만 넣으세요. `secret`·`service_role` 키와 데이터베이스 비밀번호는 어디에도 저장하지 않습니다.
 5. 직원은 보드의 **연결 설정**에서 표시 이름과 접속 코드를 한 번 입력합니다.
 

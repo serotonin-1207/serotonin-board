@@ -19,6 +19,6 @@ jobs:
       - name: Call serotonin_ping
         run: |
           URL=$(node -p "require('./supabase/public-config.json').supabaseUrl")
-          KEY=$(node -p "require('./supabase/public-config.json').publishableKey")
+          KEY="${{ vars.SUPABASE_PUBLISHABLE_KEY }}"
           RESPONSE=$(curl -fsS -X POST "$URL/rest/v1/rpc/serotonin_ping" -H "apikey: $KEY" -H "Content-Type: application/json" -d '{}')
           echo "Project answered at $RESPONSE"

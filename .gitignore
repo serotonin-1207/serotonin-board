@@ -6,3 +6,4 @@ dist/
 web/storage.js
 dist-extension/
 serotonin-board-extension-*.zip
+supabase/public-config.local.json

@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { build } from 'esbuild';
+import { publicConfig } from './public-config.mjs';
 
 const { version } = JSON.parse(await fs.readFile('package.json', 'utf8'));
 // Public project address and publishable key only (safe to ship in the page; never put secret or service_role keys here).
-const supabasePublic = JSON.parse(await fs.readFile('supabase/public-config.json', 'utf8').catch(() => '{}'));
+const supabasePublic = await publicConfig();
 const output = path.resolve('dist');
 await fs.mkdir(output, { recursive: true });
 await build({ entryPoints: ['src/storage.mjs'], bundle: true, format: 'iife', target: ['chrome100', 'safari16'], outfile: 'web/storage.js', minify: true, legalComments: 'eof' });

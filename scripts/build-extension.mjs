@@ -3,9 +3,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { build } from 'esbuild';
+import { publicConfig } from './public-config.mjs';
 
 const manifest = JSON.parse(await fs.readFile('extension/manifest.json', 'utf8'));
-const config = JSON.parse(await fs.readFile('supabase/public-config.json', 'utf8'));
+const config = await publicConfig();
+if (!config.publishableKey) throw new Error('The extension needs the publishable key (see scripts/public-config.mjs).');
 const origin = new URL(config.supabaseUrl).origin;
 // Public project address and publishable key only; the extension never holds secret keys or access codes.
 const injected = { url: origin, key: config.publishableKey, boardUrl: 'https://serotonin-1207.github.io/serotonin-board/' };
