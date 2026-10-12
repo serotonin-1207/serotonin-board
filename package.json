@@ -9,7 +9,8 @@
     "build": "node scripts/build.mjs",
     "build:extension": "node scripts/build-extension.mjs",
     "test:cloud": "node --test tests/cloud*.test.mjs",
-    "new-dept": "node scripts/new-dept.mjs"
+    "new-dept": "node scripts/new-dept.mjs",
+    "sync:gitlab": "node scripts/sync-gitlab.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",
