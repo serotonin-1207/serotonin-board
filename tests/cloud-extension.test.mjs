@@ -106,6 +106,11 @@ test('it lists upcoming schedules and open handover items of the own department 
     ['고정 항목', '펌프 점검'],
   );
   assert.equal(s.handover[1].assignee, '김철수');
+  // what the extension needs to mark an item done: its id, its latest revision ids and its current note
+  assert.equal(s.handover[1].id, id(7));
+  assert.deepEqual(s.handover[1].heads, [id(7)]);
+  assert.equal(s.handover[1].note.title, '펌프 점검');
+  assert.equal(s.handover[1].note.category, '인수인계');
   assert.equal(s.handoverCount, 2);
   await as(U2, 'd2');
   const other = await summary();

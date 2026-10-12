@@ -289,3 +289,21 @@ button.armed svg{color:#fff}
   .sheet-row{grid-template-columns:1fr;gap:8px}.sheet-results{flex-wrap:wrap}.sheet-result{flex:1}
   .sheet-count{margin-left:0;flex-basis:100%}
 }
+/* ===== 장비 월별 현황 ===== */
+.eq-month-view{margin-top:4px}
+.eq-month-view .calendar-nav{margin-bottom:10px}
+.eq-legend{font-size:11px;color:#6e7964;display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+.eq-month-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff}
+.eq-month{border-collapse:collapse;font-size:11px;min-width:100%}
+.eq-month th,.eq-month td{border-bottom:1px solid #eef0e7;padding:4px 2px;text-align:center;min-width:26px}
+.eq-month thead th,.eq-month tr:first-child th{position:sticky;top:0;background:#f8f9f4;font-weight:600;color:#6e7964}
+.eq-month th.sun{color:#b8532f}.eq-month th.sat{color:#4d6aa0}.eq-month .today{background:#fff4ec}
+.eq-month .eq-month-name{position:sticky;left:0;background:#fff;text-align:left;padding:4px 10px;min-width:150px;max-width:220px;z-index:1}
+.eq-month tr:first-child .eq-month-name{background:#f8f9f4}
+.eq-month .eq-month-name .eq-name{font-size:12px;font-weight:500}
+.eq-month-group td{text-align:left;background:#f4f6ef;color:#6e7964;font-weight:600;padding:5px 10px;position:sticky;left:0}
+.eq-month-sum{font-weight:600;color:#5c7a4f;min-width:40px}
+.eq-cell{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;border:0;font-size:11px;font-weight:700;padding:0}
+.eq-cell.ok{background:#e6f0e0;color:#3f6b3a}.eq-cell.bad{background:#fbe1d6;color:#a8421f}.eq-cell.warn{background:#f6eccf;color:#8a6a1c}
+button.eq-cell{cursor:pointer}
+.sheet-handover{margin:12px 0 0}

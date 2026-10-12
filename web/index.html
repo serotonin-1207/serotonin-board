@@ -100,7 +100,8 @@
       <section class="equipment-section" id="equipment-section" aria-label="소방장비 점검" hidden>
         <div class="eq-stats" id="eq-stats"></div>
         <div class="eq-toolbar">
-          <div class="tabs" role="group" aria-label="장비 거르기"><button class="tab active" type="button" data-eqfilter="all">전체</button><button class="tab" type="button" data-eqfilter="attention">점검 필요</button><button class="tab" type="button" data-eqfilter="problem">이상·수리</button></div>
+          <div class="tabs" role="group" aria-label="보기 방식"><button class="tab active" type="button" data-eqmode="list">목록</button><button class="tab" type="button" data-eqmode="month">월별 현황</button></div>
+          <div class="tabs eq-list-only" role="group" aria-label="장비 거르기"><button class="tab active" type="button" data-eqfilter="all">전체</button><button class="tab" type="button" data-eqfilter="attention">점검 필요</button><button class="tab" type="button" data-eqfilter="problem">이상·수리</button></div>
           <select id="eq-group" aria-label="분류 거르기"></select>
           <label class="search eq-search"><svg><use href="#i-search"/></svg><input id="eq-search" type="search" placeholder="장비명, 관리번호, 위치 검색" aria-label="장비 검색"></label>
         </div>
@@ -112,7 +113,17 @@
           <button class="text-button" type="button" id="eq-csv-list"><svg><use href="#i-download"/></svg>장비 목록 CSV</button>
           <button class="text-button" type="button" id="eq-csv-log"><svg><use href="#i-download"/></svg>점검 이력 CSV</button>
         </div>
-        <div class="eq-list" id="eq-list" aria-live="polite"></div>
+        <div class="eq-list eq-list-only" id="eq-list" aria-live="polite"></div>
+        <div class="eq-month-view" id="eq-month-view" hidden>
+          <div class="calendar-nav" role="group" aria-label="달 이동">
+            <button class="secondary icon-button" type="button" id="eq-month-prev" aria-label="이전 달"><svg><use href="#i-chevron-left"/></svg></button>
+            <h2 id="eq-month-title" aria-live="polite"></h2>
+            <button class="secondary icon-button" type="button" id="eq-month-next" aria-label="다음 달"><svg><use href="#i-chevron-right"/></svg></button>
+            <button class="secondary" type="button" id="eq-month-today">이번 달</button>
+          </div>
+          <p class="eq-legend"><span class="eq-cell ok">정</span>정상 <span class="eq-cell bad">이</span>이상 <span class="eq-cell warn">수</span>수리 <span class="eq-cell warn">교</span>교체 · 칸을 누르면 그날 점검표가 열립니다.</p>
+          <div class="eq-month-scroll"><table class="eq-month" id="eq-month"></table></div>
+        </div>
         <div class="eq-recent"><h3>최근 점검표 <small>누르면 내용을 보고 고칠 수 있습니다</small></h3><ul class="eq-sheets" id="eq-sheets"></ul></div>
       </section>
       <section class="handover-section" id="handover-section" aria-label="인수인계" hidden>
@@ -240,6 +251,7 @@
     <span class="sheet-count" id="sheet-count"></span>
   </div>
   <div class="sheet-rows" id="sheet-rows"></div>
+  <label class="checkbox-label sheet-handover"><input type="checkbox" id="sheet-to-handover" checked>이상·수리·교체 장비를 인수인계 할 일에 추가</label>
   <label>점검표 메모 <small>(선택)</small><textarea id="sheet-content" rows="2" maxlength="10000" placeholder="특이사항, 조치 요청 등"></textarea></label>
   <p class="form-message" id="sheet-message" role="status" hidden></p>
   <div class="dialog-actions"><button class="danger-text" type="button" id="sheet-trash" hidden><svg><use href="#i-trash"/></svg><span>점검표 삭제</span></button><span class="action-spacer"></span><button class="secondary" type="button" id="sheet-cancel">취소</button><button class="primary" type="button" id="sheet-save">저장</button></div>

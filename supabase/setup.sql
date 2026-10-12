@@ -1,4 +1,4 @@
--- Serotonin board: Supabase schema (0.12.0). Safe to run more than once.
+-- Serotonin board: Supabase schema (0.13.0). Safe to run more than once.
 -- Run in a dedicated free Supabase project. Enable Anonymous Sign-Ins first.
 -- Upgrading a project that ran an older setup.sql? Run supabase/migrations/0.5.0-departments.sql first.
 begin;
@@ -926,7 +926,8 @@ begin
   ), heads as (
     select ev.* from ev where not exists (select 1 from refs r where r.note_id = ev.note_id and r.pid = ev.id)
   ), latest as (
-    select distinct on (h.note_id) h.note_id, h.event->'note' as n, (h.event->>'at') as at, h.saved_at
+    select distinct on (h.note_id) h.note_id, h.event->'note' as n, (h.event->>'at') as at, h.saved_at,
+      (select jsonb_agg(h2.id order by h2.id) from heads h2 where h2.note_id = h.note_id) as head_ids
     from heads h order by h.note_id, (h.event->>'at') collate "C" desc, h.id desc
   ), live as (
     select l.*, (l.n->>'category') as cat from latest l where not coalesce((l.n->>'deleted')::boolean, false)
@@ -935,7 +936,8 @@ begin
     (select coalesce(jsonb_agg(jsonb_build_object('kind', s.n->>'kind', 'title', s.n->>'title', 'from', s.d1::text, 'to', s.d2::text) order by s.d1, s.n->>'title'), '[]'::jsonb)
        from (select l.n, (l.n->>'date')::date as d1, coalesce((l.n->>'endDate')::date, (l.n->>'date')::date) as d2 from live l where l.cat = '일정') s
        where s.d1 <= today + 14 and s.d2 >= today),
-    (select coalesce(jsonb_agg(jsonb_build_object('title', x.n->>'title', 'assignee', x.n->>'assignee', 'pinned', coalesce((x.n->>'pinned')::boolean, false))
+    (select coalesce(jsonb_agg(jsonb_build_object('id', x.note_id, 'heads', x.head_ids, 'note', x.n,
+         'title', x.n->>'title', 'assignee', x.n->>'assignee', 'pinned', coalesce((x.n->>'pinned')::boolean, false))
        order by coalesce((x.n->>'pinned')::boolean, false) desc, x.saved_at), '[]'::jsonb)
        from (select * from live where cat = '인수인계' and n->>'status' <> 'done' order by coalesce((n->>'pinned')::boolean, false) desc, saved_at limit 50) x),
     (select count(*)::int from live where cat = '인수인계' and n->>'status' <> 'done')

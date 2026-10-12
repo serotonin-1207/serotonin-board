@@ -1,8 +1,28 @@
-import { CONFIG, addNote, connect, core, disconnect, getProfile, getSettings, getSummary, refreshSummary, saveSettings } from './api.js';
+import {
+  CONFIG,
+  addNote,
+  connect,
+  core,
+  disconnect,
+  getProfile,
+  getSettings,
+  getSummary,
+  refreshSummary,
+  saveSettings,
+  setHandoverDone,
+  uploadFile,
+} from './api.js';
 import { dayLabel, groupSchedules, handoverMinutes, minutesOf, parseHandoverLines, rangeLabel, timeLabel } from './logic.mjs';
 
 const app = document.getElementById('app');
 const manifest = chrome.runtime.getManifest();
+// The same page runs as the toolbar popup and as the side panel (panel.html); the panel stays open and takes dropped files.
+const inPanel = document.body.classList.contains('panel');
+let windowId = null;
+chrome.windows
+  ?.getCurrent?.()
+  .then(w => (windowId = w.id))
+  .catch(() => {});
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -87,6 +107,58 @@ function renderConnect(note) {
   if (note) message(note);
 }
 
+// File box: pick or drop files to send them to the department's file box (kept for the chosen time, 7 days at most).
+function fileBox() {
+  const heading = el('h2', '', '파일 보내기');
+  const keep = el('select', 'keep');
+  keep.setAttribute('aria-label', '보관 기간');
+  for (const [minutes, label] of [
+    [10080, '7일 보관'],
+    [4320, '3일 보관'],
+    [1440, '1일 보관'],
+    [360, '6시간 보관'],
+    [60, '1시간 보관'],
+  ])
+    keep.append(new Option(label, String(minutes)));
+  heading.append(keep);
+  const input = el('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.hidden = true;
+  const zone = el(
+    'button',
+    'drop',
+    inPanel ? '여기에 파일을 끌어다 놓거나 눌러서 고르세요' : '눌러서 파일 고르기 (끌어다 놓기는 “옆에 띄우기”에서)',
+  );
+  zone.type = 'button';
+  zone.onclick = () => input.click();
+  const progress = el('ul', 'uploads');
+  const send = async files => {
+    for (const file of files) {
+      const line = el('li', '', file.name + ' · 준비 중');
+      progress.append(line);
+      try {
+        await uploadFile(file, Number(keep.value), share => (line.textContent = file.name + ' · ' + Math.round(share * 100) + '%'));
+        line.textContent = file.name + ' · 보냈습니다';
+        line.className = 'ok';
+      } catch (error) {
+        line.textContent = file.name + ' · ' + error.message;
+        line.className = 'bad';
+      }
+    }
+  };
+  input.onchange = () => {
+    const chosen = [...input.files];
+    input.value = '';
+    send(chosen);
+  };
+  for (const type of ['dragenter', 'dragover']) zone.addEventListener(type, event => (event.preventDefault(), zone.classList.add('over')));
+  for (const type of ['dragleave', 'drop']) zone.addEventListener(type, event => (event.preventDefault(), zone.classList.remove('over')));
+  zone.addEventListener('drop', event => send([...(event.dataTransfer?.files || [])]));
+  const note = el('p', 'stamp', '같은 부서원만 보드의 “파일”에서 받을 수 있습니다. 파일 하나 50MB까지.');
+  return [heading, zone, input, progress, note];
+}
+
 function scheduleList(items) {
   if (!items.length) return null;
   const list = el('ul', 'list');
@@ -127,14 +199,37 @@ async function renderBoard(summary, fresh) {
   parts.push(open);
   if (summary.handover.length) {
     const list = el('ul', 'list');
-    for (const item of summary.handover.slice(0, 8)) {
-      const row = el('li');
-      row.append(el('span', '', (item.pinned ? '📌 ' : '') + item.title));
+    const shownCount = inPanel ? 50 : 8;
+    for (const item of summary.handover.slice(0, shownCount)) {
+      const row = el('li', 'ho');
+      const box = el('input');
+      box.type = 'checkbox';
+      box.setAttribute('aria-label', item.title + ' 완료');
+      box.disabled = !item.id; // an older server does not send what is needed to check items
+      box.onchange = async () => {
+        box.disabled = true;
+        row.classList.add('busy');
+        try {
+          await setHandoverDone(item, box.checked);
+          row.classList.add('done');
+          message('“' + item.title + '” 완료로 표시했습니다.', true);
+          setTimeout(() => render(), 900);
+        } catch (error) {
+          box.checked = false;
+          box.disabled = false;
+          row.classList.remove('busy');
+          message(error.message);
+        }
+      };
+      const label = el('label', 'ho-label');
+      label.append(box, el('span', '', (item.pinned ? '📌 ' : '') + item.title));
+      row.append(label);
       if (item.assignee) row.append(el('span', 'who', '@' + item.assignee));
       list.append(row);
     }
     parts.push(list);
-    if (summary.handover.length > 8) parts.push(el('p', 'stamp', '나머지 ' + (summary.handoverCount - 8) + '건은 보드에서 확인하세요.'));
+    if (summary.handoverCount > shownCount)
+      parts.push(el('p', 'stamp', '나머지 ' + (summary.handoverCount - shownCount) + '건은 보드에서 확인하세요.'));
   } else parts.push(el('p', 'empty', '남은 항목이 없습니다.'));
 
   const input = el('input');
@@ -162,6 +257,8 @@ async function renderBoard(summary, fresh) {
   const row = el('div', 'row');
   row.append(input, add);
   parts.push(row);
+
+  parts.push(...fileBox());
 
   // notification settings
   const details = el('details');
@@ -197,13 +294,28 @@ async function renderBoard(summary, fresh) {
   const foot = el('div', 'foot');
   const boardButton = el('button', '', '보드 열기');
   boardButton.onclick = openBoard;
+  const panelButton = el('button', '', '옆에 띄우기');
+  panelButton.title = '사이드 패널로 열어 두고 체크하거나 파일을 끌어다 놓습니다.';
+  panelButton.hidden = inPanel || !chrome.sidePanel;
+  panelButton.onclick = () => {
+    if (windowId === null) return message('창 정보를 아직 읽지 못했습니다. 한 번 더 눌러 주세요.');
+    chrome.sidePanel
+      .open({ windowId })
+      .then(() => window.close())
+      .catch(error => message('사이드 패널을 열지 못했습니다: ' + error.message));
+  };
   const leave = el('button', 'link', '연결 해제');
   twoStep(leave, '한 번 더 누르면 해제', async () => {
     await disconnect();
     chrome.runtime.sendMessage({ type: 'refresh' });
     await render();
   });
-  foot.append(boardButton, el('span', 'stamp', (fresh ? '갱신 ' : '저장된 내용 ') + stamp(fresh || 0) + ' · v' + manifest.version), leave);
+  foot.append(
+    boardButton,
+    panelButton,
+    el('span', 'stamp', (fresh ? '갱신 ' : '저장된 내용 ') + stamp(fresh || 0) + ' · v' + manifest.version),
+    leave,
+  );
   parts.push(foot);
   app.replaceChildren(...parts);
 }

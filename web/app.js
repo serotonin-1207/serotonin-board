@@ -1328,6 +1328,8 @@
   // Nothing is ever overwritten: edits make new revisions, and every sheet stays in the cumulative history.
   const RESULT_CLASS = { 정상: 'ok', 이상: 'bad', 수리: 'warn', 교체: 'warn' };
   let eqFilter = 'all',
+    eqMode = getSetting('eqMode') === 'month' ? 'month' : 'list',
+    eqMonth = monthOf(core.koreanDay(Date.now())),
     eqEditing = null,
     sheetEditing = null,
     eqBusy = false;
@@ -1424,6 +1426,10 @@
     select.replaceChildren(new Option('모든 분류', ''), ...groups.map(g => new Option(g, g)));
     select.value = groups.includes(kept) ? kept : '';
     document.querySelectorAll('[data-eqfilter]').forEach(b => b.classList.toggle('active', b.dataset.eqfilter === eqFilter));
+    document.querySelectorAll('[data-eqmode]').forEach(b => b.classList.toggle('active', b.dataset.eqmode === eqMode));
+    document.querySelectorAll('.eq-list-only').forEach(n => (n.hidden = eqMode !== 'list'));
+    $('eq-month-view').hidden = eqMode !== 'month';
+    if (eqMode === 'month') renderEquipmentMonth(list);
     const words = $('eq-search').value.trim().toLocaleLowerCase('ko-KR');
     const shown = list
       .filter(x => {
@@ -1462,6 +1468,90 @@
         : [el('li', 'ho-empty', '아직 점검 기록이 없습니다.')]),
     );
   }
+  // Month grid: one row per item, one column per day, the result of every check that month.
+  function renderEquipmentMonth(list) {
+    const { year, month } = eqMonth;
+    $('eq-month-title').textContent = year + '년 ' + month + '월';
+    const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const prefix = year + '-' + String(month).padStart(2, '0') + '-';
+    const today = calendarToday();
+    const cells = core.inspectionMonth(notes, year, month);
+    const table = $('eq-month');
+    const head = el('tr');
+    head.append(el('th', 'eq-month-name', '장비'));
+    for (let d = 1; d <= days; d++) {
+      const day = prefix + String(d).padStart(2, '0');
+      const weekday = new Date(day + 'T00:00:00Z').getUTCDay();
+      const th = el('th', (weekday === 0 ? 'sun' : weekday === 6 ? 'sat' : '') + (day === today ? ' today' : ''), String(d));
+      th.title = shortDay(day);
+      head.append(th);
+    }
+    head.append(el('th', 'eq-month-sum', '횟수'));
+    const rows = [head];
+    let group = null;
+    for (const item of list) {
+      if (item.note.group !== group) {
+        group = item.note.group;
+        const tr = el('tr', 'eq-month-group');
+        const td = el('td', '', group);
+        td.colSpan = days + 2;
+        tr.append(td);
+        rows.push(tr);
+      }
+      const tr = el('tr');
+      const name = el('th', 'eq-month-name');
+      const link = el('button', 'eq-name', item.note.title);
+      link.type = 'button';
+      link.onclick = () => openEquipmentLog(item.note.id);
+      name.append(link);
+      tr.append(name);
+      let count = 0;
+      for (let d = 1; d <= days; d++) {
+        const day = prefix + String(d).padStart(2, '0');
+        const cell = cells.get(item.note.id + '|' + day);
+        const td = el('td', day === today ? 'today' : '');
+        if (cell) {
+          count++;
+          const b = el('button', 'eq-cell ' + RESULT_CLASS[cell.result], cell.result.slice(0, 1));
+          b.type = 'button';
+          b.title = shortDay(day) + ' ' + cell.result + (cell.memo ? ' · ' + cell.memo : '') + ' · ' + cell.author;
+          b.setAttribute('aria-label', item.note.title + ' ' + b.title);
+          b.onclick = () => openSheet({ sheetId: cell.sheetId });
+          td.append(b);
+        }
+        tr.append(td);
+      }
+      tr.append(el('td', 'eq-month-sum', String(count)));
+      rows.push(tr);
+    }
+    if (!list.length) {
+      const tr = el('tr');
+      const td = el('td', 'ho-empty', '등록된 장비가 없습니다.');
+      td.colSpan = days + 2;
+      tr.append(td);
+      rows.push(tr);
+    }
+    table.replaceChildren(...rows);
+  }
+  function shiftEquipmentMonth(delta) {
+    const index = eqMonth.year * 12 + eqMonth.month - 1 + delta;
+    eqMonth = { year: Math.floor(index / 12), month: (index % 12) + 1 };
+    renderEquipment();
+  }
+  $('eq-month-prev').onclick = () => shiftEquipmentMonth(-1);
+  $('eq-month-next').onclick = () => shiftEquipmentMonth(1);
+  $('eq-month-today').onclick = () => {
+    eqMonth = monthOf(calendarToday());
+    renderEquipment();
+  };
+  document.querySelectorAll('[data-eqmode]').forEach(
+    b =>
+      (b.onclick = () => {
+        eqMode = b.dataset.eqmode;
+        setSetting('eqMode', eqMode);
+        renderEquipment();
+      }),
+  );
   function equipmentRow(item) {
     const n = item.note;
     const row = el('div', 'eq-row' + (item.attention ? ' attention' : ''));
@@ -1672,6 +1762,7 @@
     $('sheet-name').value = sheet?.title || shortDay(today) + ' 장비 점검';
     $('sheet-content').value = sheet?.content || '';
     $('sheet-trash').hidden = !sheet;
+    $('sheet-to-handover').checked = true;
     $('sheet-message').hidden = true;
     $('sheet-save').disabled = false;
     renderSheetRows();
@@ -1781,12 +1872,40 @@
     eqBusy = true;
     $('sheet-save').disabled = true;
     try {
+      const editing = sheetEditing;
       await commit(
-        sheetEditing.id,
-        sheetEditing.key,
+        editing.id,
+        editing.key,
         { title, content: $('sheet-content').value, category: INSPECT, status: 'done', pinned: false, deleted: false, date, results },
-        sheetEditing.parents,
+        editing.parents,
       );
+      // Problems that are new on this sheet (not already reported on its previous version) become handover to-dos.
+      const before = new Map((editing.sheet?.results || []).map(r => [r.e, r.r]));
+      const fresh = $('sheet-to-handover').checked ? results.filter(r => r.r !== '정상' && before.get(r.e) !== r.r) : [];
+      let added = 0;
+      for (const r of fresh) {
+        const name = editing.rows.find(row => row.id === r.e)?.note?.title || '장비';
+        try {
+          await commit(
+            randomId(),
+            '',
+            {
+              title: ('[장비] ' + name + ' ' + r.r + (r.m ? ': ' + r.m : '')).slice(0, 120),
+              content: '점검표 “' + title + '” (' + date + ')에서 ' + r.r + '(으)로 기록되었습니다.',
+              category: HANDOVER,
+              status: 'todo',
+              pinned: false,
+              deleted: false,
+            },
+            [],
+          );
+          added++;
+        } catch (error) {
+          toast('점검표는 저장했지만 인수인계 추가 중 멈췄습니다: ' + error.message);
+          break;
+        }
+      }
+      if (added) toast('점검표를 저장하고 조치 필요 장비 ' + added + '개를 인수인계 할 일에 추가했습니다.');
       $('sheet-dialog').close();
       sheetEditing = null;
     } catch (error) {

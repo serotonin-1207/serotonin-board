@@ -73,20 +73,51 @@ export async function disconnect() {
   storage = null;
 }
 
+function newEvent(profile, noteId, parents, note) {
+  const event = {
+    schema: 1,
+    id: randomId(),
+    noteId,
+    parents,
+    at: new Date().toISOString(),
+    note: { ...note, author: profile.name },
+    actor: { id: profile.clientId, kind: 'display-only' },
+  };
+  if (!core.validEvent(event)) throw new Error('제목과 내용 길이를 확인해 주세요.');
+  return event;
+}
+
+// Marks an open handover item done (or open again) with a new revision on top of its latest ones, like the board's checkbox.
+export async function setHandoverDone(item, done) {
+  const profile = await getProfile();
+  if (!profile) throw new Error('먼저 확장 프로그램에서 접속 코드를 입력해 연결해 주세요.');
+  if (!item?.id || !Array.isArray(item.heads) || !item.note) throw new Error('보드 서버를 0.13.0으로 올린 뒤에 체크할 수 있습니다.');
+  const { author, ...note } = item.note;
+  await getStorage().append(newEvent(profile, item.id, item.heads, { ...note, status: done ? 'done' : 'todo' }));
+}
+
+// Sends a file to the department's file box (the same one as the board's 파일 page). Space is reserved first and given back on failure.
+export const MAX_FILE_BYTES = 50 * 1024 * 1024;
+export async function uploadFile(file, minutes, onProgress) {
+  if (!file.size) throw new Error('빈 파일은 올릴 수 없습니다.');
+  if (file.size > MAX_FILE_BYTES) throw new Error('파일 하나는 50MB까지 올릴 수 있습니다.');
+  const store = getStorage();
+  const reserved = await store.fileBegin({ name: file.name, size: file.size, mime: file.type, minutes });
+  try {
+    await store.fileUpload(reserved.path, file, { onProgress });
+    await store.fileFinish(reserved.id);
+  } catch (error) {
+    store.fileRemove({ id: reserved.id, path: reserved.path }).catch(() => {});
+    throw error;
+  }
+  return reserved;
+}
+
 // Writes one new note (handover item or memo) exactly like the board does: a first revision with no parents.
 export async function addNote(note) {
   const profile = await getProfile();
   if (!profile) throw new Error('먼저 확장 프로그램에서 접속 코드를 입력해 연결해 주세요.');
-  const event = {
-    schema: 1,
-    id: randomId(),
-    noteId: randomId(),
-    parents: [],
-    at: new Date().toISOString(),
-    note: { content: '', status: 'todo', pinned: false, deleted: false, ...note, author: profile.name },
-    actor: { id: profile.clientId, kind: 'display-only' },
-  };
-  if (!core.validEvent(event)) throw new Error('제목과 내용 길이를 확인해 주세요.');
+  const event = newEvent(profile, randomId(), [], { content: '', status: 'todo', pinned: false, deleted: false, ...note });
   await getStorage().append(event);
   return event;
 }

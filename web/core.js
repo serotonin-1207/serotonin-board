@@ -249,6 +249,21 @@
           a.note.id.localeCompare(b.note.id),
       );
   }
+  // Results of one month as a grid: "equipmentId|YYYY-MM-DD" -> the latest result recorded for that item on that day.
+  function inspectionMonth(notes, year, month) {
+    const prefix = String(year).padStart(4, '0') + '-' + String(month).padStart(2, '0') + '-';
+    const cells = new Map();
+    for (const sheet of notes) {
+      if (sheet.category !== INSPECTION_CATEGORY || sheet.deleted || !sheet.date.startsWith(prefix)) continue;
+      for (const r of sheet.results) {
+        const key = r.e + '|' + sheet.date;
+        const known = cells.get(key);
+        if (!known || sheet.at > known.at)
+          cells.set(key, { result: r.r, memo: r.m || '', author: sheet.author, at: sheet.at, sheetId: sheet.id });
+      }
+    }
+    return cells;
+  }
   // Every recorded result of one piece of equipment, newest first (sheets in the trash are left out).
   function inspectionHistory(notes, equipmentId) {
     const rows = [];
@@ -294,6 +309,7 @@
     MAX_SHEET_ITEMS,
     equipmentStatus,
     inspectionHistory,
+    inspectionMonth,
     handoverOn,
     dayOfAt,
     TEAM_COUNT,

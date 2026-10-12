@@ -29,6 +29,7 @@ for (const entry of ['background', 'popup']) {
   });
 }
 await fs.copyFile('extension/popup.html', path.join(out, 'popup.html'));
+await fs.copyFile('extension/panel.html', path.join(out, 'panel.html'));
 await fs.copyFile('extension/popup.css', path.join(out, 'popup.css'));
 await fs.writeFile(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2).replace('__SUPABASE_ORIGIN__', origin) + '\n');
 

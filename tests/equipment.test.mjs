@@ -226,3 +226,17 @@ test('equipment and cumulative inspection spreadsheets', () => {
   assert.match(log[2], /^2026-10-01,구조장비,유압 절단기,C-1,이상,'=마모,/); // formula-looking text stays text in Excel
   assert.match(log[3], /^2026-10-03,구조장비,유압 절단기,C-1,정상,/);
 });
+
+test('the monthly grid keeps the latest result per item and day, only for that month and without trashed sheets', () => {
+  const A = 'a'.repeat(32);
+  const notes = [
+    sh('1'.repeat(32), '2026-10-05', [{ e: A, r: '이상', m: '첫 확인' }], { at: '2026-10-05T01:00:00Z' }),
+    sh('2'.repeat(32), '2026-10-05', [{ e: A, r: '정상' }], { at: '2026-10-05T05:00:00Z' }), // re-checked later that day
+    sh('3'.repeat(32), '2026-10-09', [{ e: A, r: '교체' }], { deleted: true }),
+    sh('4'.repeat(32), '2026-11-01', [{ e: A, r: '수리' }]),
+  ];
+  const cells = core.inspectionMonth(notes, 2026, 10);
+  assert.deepEqual([...cells.keys()], [A + '|2026-10-05']);
+  assert.equal(cells.get(A + '|2026-10-05').result, '정상');
+  assert.equal(core.inspectionMonth(notes, 2026, 11).get(A + '|2026-11-01').result, '수리');
+});
