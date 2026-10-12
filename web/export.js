@@ -7,7 +7,8 @@
   // A cell that starts with = + - @ would be run as a formula by Excel; a leading apostrophe keeps it as text.
   function csvCell(value) {
     let text = value === null || value === undefined ? '' : String(value);
-    if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
+    // (real numbers such as -2 days left are not formulas and stay numbers)
+    if (typeof value !== 'number' && /^[=+\-@\t\r]/.test(text)) text = "'" + text;
     return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
   }
   function toCsv(header, rows) {
@@ -119,6 +120,86 @@
     return toCsv(header, rows);
   }
 
+  // Fire equipment: one row per item with its latest inspection and the next due date.
+  function equipmentCsv(core, notes, today) {
+    const header = [
+      '분류',
+      '장비명',
+      '관리번호·수량',
+      '보관 위치',
+      '점검 주기(일)',
+      '최근 점검일',
+      '최근 결과',
+      '최근 메모',
+      '최근 점검자',
+      '다음 점검일',
+      '남은 일수',
+      '상태',
+      '비고',
+      '등록자',
+      '등록 시각',
+    ];
+    const rows = core
+      .equipmentStatus(notes, today)
+      .map(s => [
+        s.note.group,
+        s.note.title,
+        s.note.code || '',
+        s.note.location || '',
+        s.note.cycle,
+        s.last ? s.last.date : '',
+        s.last ? s.last.result : '',
+        s.last ? s.last.memo : '',
+        s.last ? s.last.author : '',
+        s.due || '',
+        s.daysLeft === null ? '' : s.daysLeft,
+        !s.last ? '미점검' : s.overdue ? '기한 지남' : s.last.result !== '정상' ? '조치 필요' : '정상',
+        s.note.content,
+        s.note.history ? s.note.history[0].note.author : '',
+        s.note.history ? kst(s.note.history[0].at) : '',
+      ]);
+    return toCsv(header, rows);
+  }
+  // Every inspection result ever recorded (sheets in the trash left out), oldest first: the cumulative record.
+  function inspectionsCsv(core, notes) {
+    const names = new Map(notes.filter(n => n.category === core.EQUIPMENT_CATEGORY).map(n => [n.id, n]));
+    const header = [
+      '점검일',
+      '분류',
+      '장비명',
+      '관리번호·수량',
+      '결과',
+      '메모',
+      '점검자',
+      '점검표',
+      '점검표 메모',
+      '기록 시각',
+      '장비 상태',
+    ];
+    const rows = [];
+    for (const sheet of notes) {
+      if (sheet.category !== core.INSPECTION_CATEGORY || sheet.deleted) continue;
+      for (const r of sheet.results) {
+        const item = names.get(r.e);
+        rows.push([
+          sheet.date,
+          item ? item.group : '',
+          item ? item.title : '(알 수 없는 장비)',
+          item ? item.code || '' : '',
+          r.r,
+          r.m || '',
+          sheet.author,
+          sheet.title,
+          sheet.content,
+          kst(sheet.at),
+          !item ? '' : item.deleted ? '삭제됨' : '사용 중',
+        ]);
+      }
+    }
+    rows.sort((a, b) => a[0].localeCompare(b[0]) || a[9].localeCompare(b[9]) || String(a[2]).localeCompare(String(b[2]), 'ko'));
+    return toCsv(header, rows);
+  }
+
   // The handover log: for every shift day, the list exactly as it looked that day (checked or not, how long carried over).
   function logbookCsv(core, notes, today, rotating, team) {
     const first = notes
@@ -209,7 +290,19 @@
     return ordered;
   }
 
-  const api = { parseBackup, orderForRestore, csvCell, toCsv, kst, itemsCsv, revisionsCsv, logbookCsv, backupJson };
+  const api = {
+    parseBackup,
+    orderForRestore,
+    csvCell,
+    toCsv,
+    kst,
+    itemsCsv,
+    revisionsCsv,
+    logbookCsv,
+    backupJson,
+    equipmentCsv,
+    inspectionsCsv,
+  };
   root.BoardExport = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

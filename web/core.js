@@ -51,6 +51,14 @@
   const MEMO_CATEGORIES = ['공지사항', '업무 메모'];
   // Saved lists of handover items (name = title, one item per line = content). Shown only in the template dialog.
   const TEMPLATE_CATEGORY = '템플릿';
+  // Fire equipment inspection board: equipment items (category '장비') and inspection sheets (category '점검').
+  // One sheet records the results of many items on one day, so a daily round costs one revision instead of one per item.
+  const EQUIPMENT_CATEGORY = '장비';
+  const INSPECTION_CATEGORY = '점검';
+  const INSPECTION_RESULTS = ['정상', '이상', '수리', '교체'];
+  const MAX_SHEET_ITEMS = 300;
+  const EQUIPMENT_KEYS = ['group', 'code', 'location', 'cycle'];
+  const EXTRA_KEYS = [...EQUIPMENT_KEYS, 'results'];
   // Rotating (24h shift) departments change day at 09:00 KST = 00:00 UTC; office departments change day at midnight KST.
   const KST_OFFSET_MS = 9 * 3600000;
   function dayOffsetMs(rotating) {
@@ -84,7 +92,12 @@
       const createdDay = dayOfAt(note.history[0].at, rotating);
       items.push({ note, state: end, done, pinned: end.note.pinned, createdDay, carriedDays: Math.max(0, daysBetween(createdDay, day)) });
     }
-    return items.sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.note.history[0].at.localeCompare(b.note.history[0].at) || a.note.id.localeCompare(b.note.id));
+    return items.sort(
+      (a, b) =>
+        Number(b.pinned) - Number(a.pinned) ||
+        a.note.history[0].at.localeCompare(b.note.history[0].at) ||
+        a.note.id.localeCompare(b.note.id),
+    );
   }
   // Only handover items can name a person in charge (optional, 1-40 characters).
   function validAssignee(n) {
@@ -95,6 +108,40 @@
     if (!SCHEDULE_KINDS.includes(n.kind) || !validDay(n.date)) return false;
     if (n.endDate === undefined) return true;
     return validDay(n.endDate) && n.endDate >= n.date && daysBetween(n.date, n.endDate) <= MAX_SCHEDULE_DAYS;
+  }
+  function shortText(value, max) {
+    return typeof value === 'string' && value.trim().length > 0 && value.length <= max;
+  }
+  function noExtras(n, allowed = []) {
+    return EXTRA_KEYS.every(key => allowed.includes(key) || n[key] === undefined);
+  }
+  function validEquipment(n) {
+    return (
+      shortText(n.group, 30) &&
+      (n.code === undefined || shortText(n.code, 40)) &&
+      (n.location === undefined || shortText(n.location, 40)) &&
+      Number.isInteger(n.cycle) &&
+      n.cycle >= 1 &&
+      n.cycle <= 366 &&
+      n.kind === undefined &&
+      n.date === undefined &&
+      n.endDate === undefined &&
+      n.assignee === undefined &&
+      noExtras(n, EQUIPMENT_KEYS)
+    );
+  }
+  function validInspection(n) {
+    if (!validDay(n.date) || n.kind !== undefined || n.endDate !== undefined || n.assignee !== undefined || !noExtras(n, ['results']))
+      return false;
+    if (!Array.isArray(n.results) || n.results.length < 1 || n.results.length > MAX_SHEET_ITEMS) return false;
+    const seen = new Set();
+    for (const r of n.results) {
+      if (!r || typeof r !== 'object' || Array.isArray(r) || Object.keys(r).some(k => !['e', 'r', 'm'].includes(k))) return false;
+      if (!ID.test(r.e) || seen.has(r.e) || !INSPECTION_RESULTS.includes(r.r)) return false;
+      if (r.m !== undefined && !shortText(r.m, 200)) return false;
+      seen.add(r.e);
+    }
+    return true;
   }
   function validEvent(e) {
     if (!e || e.schema !== 1 || !ID.test(e.id) || !ID.test(e.noteId)) return false;
@@ -118,12 +165,17 @@
       n.author.trim().length > 0 &&
       n.author.length <= 40 &&
       (n.category === SCHEDULE_CATEGORY
-        ? validSchedule(n) && n.assignee === undefined
-        : (CATEGORIES.includes(n.category) || n.category === TEMPLATE_CATEGORY) &&
-          n.kind === undefined &&
-          n.date === undefined &&
-          n.endDate === undefined &&
-          validAssignee(n)) &&
+        ? validSchedule(n) && n.assignee === undefined && noExtras(n)
+        : n.category === EQUIPMENT_CATEGORY
+          ? validEquipment(n)
+          : n.category === INSPECTION_CATEGORY
+            ? validInspection(n)
+            : (CATEGORIES.includes(n.category) || n.category === TEMPLATE_CATEGORY) &&
+              n.kind === undefined &&
+              n.date === undefined &&
+              n.endDate === undefined &&
+              noExtras(n) &&
+              validAssignee(n)) &&
       STATUSES.includes(n.status) &&
       typeof n.pinned === 'boolean' &&
       typeof n.deleted === 'boolean'
@@ -168,6 +220,54 @@
       })
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.at.localeCompare(a.at) || a.id.localeCompare(b.id));
   }
+  // Current state of every piece of equipment: its latest result, when it is due next and whether it is overdue.
+  // Sheets in the trash do not count; equipment in the trash is left out (its old results stay in the history).
+  function equipmentStatus(notes, today) {
+    const latest = new Map();
+    for (const sheet of notes) {
+      if (sheet.category !== INSPECTION_CATEGORY || sheet.deleted) continue;
+      for (const r of sheet.results) {
+        const known = latest.get(r.e);
+        if (!known || sheet.date > known.date || (sheet.date === known.date && sheet.at > known.at))
+          latest.set(r.e, { date: sheet.date, result: r.r, memo: r.m || '', author: sheet.author, at: sheet.at, sheetId: sheet.id });
+      }
+    }
+    return notes
+      .filter(n => n.category === EQUIPMENT_CATEGORY && !n.deleted)
+      .map(note => {
+        const last = latest.get(note.id) || null;
+        const due = last ? addDays(last.date, note.cycle) : null;
+        const daysLeft = due ? daysBetween(today, due) : null;
+        // never checked, overdue, or last result not "정상" all need attention
+        const attention = !last || daysLeft < 0 || last.result !== '정상';
+        return { note, last, due, daysLeft, overdue: daysLeft !== null && daysLeft < 0, attention };
+      })
+      .sort(
+        (a, b) =>
+          a.note.group.localeCompare(b.note.group, 'ko') ||
+          a.note.title.localeCompare(b.note.title, 'ko') ||
+          a.note.id.localeCompare(b.note.id),
+      );
+  }
+  // Every recorded result of one piece of equipment, newest first (sheets in the trash are left out).
+  function inspectionHistory(notes, equipmentId) {
+    const rows = [];
+    for (const sheet of notes) {
+      if (sheet.category !== INSPECTION_CATEGORY || sheet.deleted) continue;
+      const r = sheet.results.find(x => x.e === equipmentId);
+      if (r)
+        rows.push({
+          date: sheet.date,
+          result: r.r,
+          memo: r.m || '',
+          author: sheet.author,
+          at: sheet.at,
+          sheetId: sheet.id,
+          sheetTitle: sheet.title,
+        });
+    }
+    return rows.sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at));
+  }
   function headKey(note) {
     return note
       ? note.heads
@@ -188,6 +288,12 @@
     HANDOVER_CATEGORY,
     MEMO_CATEGORIES,
     TEMPLATE_CATEGORY,
+    EQUIPMENT_CATEGORY,
+    INSPECTION_CATEGORY,
+    INSPECTION_RESULTS,
+    MAX_SHEET_ITEMS,
+    equipmentStatus,
+    inspectionHistory,
     handoverOn,
     dayOfAt,
     TEAM_COUNT,

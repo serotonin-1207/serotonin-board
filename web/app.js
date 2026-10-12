@@ -10,6 +10,8 @@
   const HANDOVER = core.HANDOVER_CATEGORY;
   const MEMO_CATEGORIES = core.MEMO_CATEGORIES;
   const TEMPLATE = core.TEMPLATE_CATEGORY;
+  const EQUIP = core.EQUIPMENT_CATEGORY;
+  const INSPECT = core.INSPECTION_CATEGORY;
   const BULLET = /^\s*(?:[-*•▢☐□☑✔]|\d+[.)])\s*/;
   // Department (Supabase backend): rotating = 24h shifts with the day changing at 09:00; office departments use plain dates.
   let rotating = true,
@@ -275,7 +277,7 @@
   }
   function render() {
     // Calendar schedules and handover items live in the same revision store but never appear on the memo board (except in the trash).
-    const memos = notes.filter(n => n.category !== SCHEDULE && n.category !== HANDOVER && n.category !== TEMPLATE);
+    const memos = notes.filter(n => ![SCHEDULE, HANDOVER, TEMPLATE, EQUIP, INSPECT].includes(n.category));
     const active = memos.filter(n => !n.deleted);
     $('stat-total').textContent = active.length;
     $('nav-total').textContent = active.length;
@@ -285,6 +287,13 @@
     const pending = core.handoverOn(notes, todayKey(), rotating).filter(item => !item.done).length;
     $('nav-handover').textContent = pending;
     $('nav-handover').hidden = !pending;
+    const needCheck = core.equipmentStatus(notes, core.koreanDay(Date.now())).filter(item => item.attention).length;
+    $('nav-equipment').textContent = needCheck;
+    $('nav-equipment').hidden = !needCheck;
+    if (view === 'equipment') {
+      renderEquipment();
+      return;
+    }
     if (view === 'files') {
       renderFiles();
       return;
@@ -351,7 +360,9 @@
       'note-body',
       note.category === SCHEDULE
         ? note.kind + ' · ' + scheduleRange(note) + (note.content ? '\n' + note.content : '')
-        : note.content || '내용 없이 제목만 남긴 메모입니다.',
+        : note.category === EQUIP || note.category === INSPECT
+          ? equipmentSummary(note)
+          : note.content || '내용 없이 제목만 남긴 메모입니다.',
     );
     const bottom = el('div', 'card-footer');
     bottom.append(el('span', 'card-avatar', note.author.slice(0, 1)), el('span', 'card-author', note.author));
@@ -643,6 +654,8 @@
         }
         item.append(header, el('h3', '', event.note.title + (event.note.deleted ? ' · 휴지통' : '')));
         if (event.note.category === SCHEDULE) item.append(el('p', 'schedule-detail', event.note.kind + ' · ' + scheduleRange(event.note)));
+        if (event.note.category === EQUIP || event.note.category === INSPECT)
+          item.append(el('p', 'schedule-detail', equipmentSummary(event.note)));
         item.append(el('p', '', event.note.content || '내용 없음'));
         const isHead = note.heads.some(e => e.id === event.id);
         const button = el(
@@ -1309,6 +1322,567 @@
   for (const type of ['dragleave', 'drop'])
     $('file-drop').addEventListener(type, event => (event.preventDefault(), $('file-drop').classList.remove('over')));
   $('file-drop').addEventListener('drop', event => uploadFiles(event.dataTransfer?.files || []));
+
+  // ===== 소방장비 점검 =====
+  // Equipment items are notes (category 장비); an inspection sheet (category 점검) records many results of one day.
+  // Nothing is ever overwritten: edits make new revisions, and every sheet stays in the cumulative history.
+  const RESULT_CLASS = { 정상: 'ok', 이상: 'bad', 수리: 'warn', 교체: 'warn' };
+  let eqFilter = 'all',
+    eqEditing = null,
+    sheetEditing = null,
+    eqBusy = false;
+  const calendarToday = () => core.koreanDay(Date.now());
+  function shortDay(day) {
+    const [, month, date] = day.split('-').map(Number);
+    return month + '/' + date + '(' + WEEKDAYS[new Date(day + 'T00:00:00Z').getUTCDay()] + ')';
+  }
+  function equipmentSummary(note) {
+    if (note.category === EQUIP)
+      return (
+        [note.group, note.code, note.location, note.cycle + '일마다 점검'].filter(Boolean).join(' · ') +
+        (note.content ? '\n' + note.content : '')
+      );
+    const bad = note.results.filter(r => r.r !== '정상').length;
+    return (
+      note.date + ' · 장비 ' + note.results.length + '개' + (bad ? ' · 조치 ' + bad + '개' : '') + (note.content ? '\n' + note.content : '')
+    );
+  }
+  function plainEquipment(n) {
+    const note = {
+      title: n.title,
+      content: n.content,
+      category: EQUIP,
+      status: n.status,
+      pinned: n.pinned,
+      deleted: n.deleted,
+      group: n.group,
+      cycle: n.cycle,
+    };
+    if (n.code) note.code = n.code;
+    if (n.location) note.location = n.location;
+    return note;
+  }
+  function plainSheet(n) {
+    return {
+      title: n.title,
+      content: n.content,
+      category: INSPECT,
+      status: n.status,
+      pinned: n.pinned,
+      deleted: n.deleted,
+      date: n.date,
+      results: n.results.map(r => ({ ...r })),
+    };
+  }
+  // Applies a change on top of the newest revision (moving to the trash, mostly).
+  async function patchNote(noteId, plain, patch) {
+    await refresh();
+    const current = notes.find(n => n.id === noteId);
+    if (!current) throw new Error('기록을 찾지 못했습니다. 새로고침해 주세요.');
+    if (current.conflict) {
+      showHistory(noteId);
+      return false;
+    }
+    await commit(
+      noteId,
+      core.headKey(current),
+      { ...plain(current), ...patch },
+      current.heads.map(e => e.id),
+    );
+    return true;
+  }
+  function dueBadge(item) {
+    if (!item.last) return el('span', 'eq-due bad', '미점검');
+    if (item.daysLeft < 0) return el('span', 'eq-due bad', -item.daysLeft + '일 지남');
+    if (item.daysLeft === 0) return el('span', 'eq-due warn', '오늘');
+    return el('span', 'eq-due ' + (item.daysLeft <= 3 ? 'warn' : 'ok'), 'D-' + item.daysLeft);
+  }
+  function resultChip(result) {
+    return el('span', 'eq-result ' + RESULT_CLASS[result], result);
+  }
+  function renderEquipment() {
+    const today = calendarToday();
+    const list = core.equipmentStatus(notes, today);
+    const overdue = list.filter(x => x.overdue).length,
+      never = list.filter(x => !x.last).length,
+      problem = list.filter(x => x.last && x.last.result !== '정상').length,
+      soon = list.filter(x => x.daysLeft !== null && x.daysLeft >= 0 && x.daysLeft <= 7).length;
+    const tile = (label, value, small, cls) => {
+      const box = el('div', 'eq-stat' + (cls ? ' ' + cls : ''));
+      box.append(el('span', '', label), el('strong', '', String(value)), el('small', '', small));
+      return box;
+    };
+    $('eq-stats').replaceChildren(
+      tile('전체 장비', list.length, '사용 중인 장비', ''),
+      tile('점검 필요', overdue + never, '기한 지남 ' + overdue + ' · 미점검 ' + never, overdue + never ? 'alert' : ''),
+      tile('조치 필요', problem, '최근 결과 이상·수리·교체', problem ? 'alert' : ''),
+      tile('7일 안 점검', soon, '곧 점검할 장비', ''),
+    );
+    const groups = [...new Set(list.map(x => x.note.group))].sort((a, b) => a.localeCompare(b, 'ko'));
+    const select = $('eq-group'),
+      kept = select.value;
+    select.replaceChildren(new Option('모든 분류', ''), ...groups.map(g => new Option(g, g)));
+    select.value = groups.includes(kept) ? kept : '';
+    document.querySelectorAll('[data-eqfilter]').forEach(b => b.classList.toggle('active', b.dataset.eqfilter === eqFilter));
+    const words = $('eq-search').value.trim().toLocaleLowerCase('ko-KR');
+    const shown = list
+      .filter(x => {
+        if (eqFilter === 'attention' && !(x.overdue || !x.last)) return false;
+        if (eqFilter === 'problem' && !(x.last && x.last.result !== '정상')) return false;
+        if (select.value && x.note.group !== select.value) return false;
+        const text = [x.note.title, x.note.code, x.note.location, x.note.group, x.note.content].join(' ').toLocaleLowerCase('ko-KR');
+        return !words || text.includes(words);
+      })
+      // needing attention first, then the soonest due
+      .sort((a, b) => Number(b.attention) - Number(a.attention) || (a.daysLeft ?? -9999) - (b.daysLeft ?? -9999));
+    if (!list.length)
+      $('eq-list').replaceChildren(el('p', 'ho-empty', '등록된 장비가 없습니다. “장비 추가” 또는 “여러 개 추가”로 목록을 만들어 주세요.'));
+    else if (!shown.length) $('eq-list').replaceChildren(el('p', 'ho-empty', '조건에 맞는 장비가 없습니다.'));
+    else $('eq-list').replaceChildren(...shown.map(equipmentRow));
+    const sheets = notes
+      .filter(n => n.category === INSPECT && !n.deleted)
+      .sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at))
+      .slice(0, 15);
+    $('eq-sheets').replaceChildren(
+      ...(sheets.length
+        ? sheets.map(sheet => {
+            const li = el('li');
+            const button = el('button', 'eq-sheet');
+            button.type = 'button';
+            const bad = sheet.results.filter(r => r.r !== '정상').length;
+            button.append(
+              el('strong', '', shortDay(sheet.date)),
+              el('span', '', sheet.title),
+              el('small', '', '장비 ' + sheet.results.length + '개' + (bad ? ' · 조치 ' + bad : '') + ' · ' + sheet.author),
+            );
+            button.onclick = () => openSheet({ sheetId: sheet.id });
+            li.append(button);
+            return li;
+          })
+        : [el('li', 'ho-empty', '아직 점검 기록이 없습니다.')]),
+    );
+  }
+  function equipmentRow(item) {
+    const n = item.note;
+    const row = el('div', 'eq-row' + (item.attention ? ' attention' : ''));
+    const main = el('div', 'eq-main');
+    const title = el('button', 'eq-name', n.title);
+    title.type = 'button';
+    title.onclick = () => openEquipmentLog(n.id);
+    main.append(title, el('small', '', [n.group, n.code, n.location, n.cycle + '일마다'].filter(Boolean).join(' · ')));
+    const last = el('div', 'eq-last');
+    if (item.last) {
+      last.append(el('span', '', shortDay(item.last.date) + ' '), resultChip(item.last.result), el('small', '', ' ' + item.last.author));
+      if (item.last.memo) last.append(el('p', 'eq-memo', item.last.memo));
+    } else last.append(el('span', 'eq-none', '점검 기록 없음'));
+    const due = el('div', 'eq-due-box');
+    due.append(dueBadge(item));
+    if (item.due) due.append(el('small', '', '다음 ' + shortDay(item.due)));
+    const actions = el('div', 'eq-row-actions');
+    const button = (label, onClick, cls = 'secondary') => {
+      const b = el('button', cls, label);
+      b.type = 'button';
+      b.onclick = onClick;
+      return b;
+    };
+    const remove = button('삭제', null, 'file-del');
+    twoStep(remove, '정말 삭제', async () => {
+      if (!equipmentWritable()) return;
+      try {
+        if (await patchNote(n.id, plainEquipment, { deleted: true }))
+          toast('“' + n.title + '”을(를) 휴지통으로 옮겼습니다. 점검 기록은 그대로 남습니다.');
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+    actions.append(
+      button('점검', () => openSheet({ preselect: n.id })),
+      button('이력', () => openEquipmentLog(n.id)),
+      button('수정', () => openEquipment(n.id)),
+      remove,
+    );
+    row.append(main, last, due, actions);
+    return row;
+  }
+  function equipmentWritable() {
+    if (!author || !writeConnected) {
+      settings();
+      return false;
+    }
+    if (!synced) {
+      toast('공유 자료 연결을 먼저 확인해 주세요.');
+      return false;
+    }
+    return true;
+  }
+  function openEquipment(id) {
+    if (!equipmentWritable()) return;
+    const note = id ? notes.find(n => n.id === id) : null;
+    eqEditing = { id: note?.id || randomId(), key: core.headKey(note), parents: note ? note.heads.map(e => e.id) : [] };
+    $('eq-dialog-title').textContent = note ? '장비 수정' : '장비 추가';
+    $('eq-name').value = note?.title || '';
+    $('eq-group-input').value = note?.group || '';
+    $('eq-cycle').value = note?.cycle || 30;
+    $('eq-code').value = note?.code || '';
+    $('eq-location').value = note?.location || '';
+    $('eq-note').value = note?.content || '';
+    $('eq-history-open').hidden = !note;
+    $('eq-message').hidden = true;
+    $('eq-dialog').showModal();
+    $('eq-name').focus();
+  }
+  function equipmentFromForm() {
+    const note = {
+      title: $('eq-name').value.trim(),
+      content: $('eq-note').value,
+      category: EQUIP,
+      status: 'todo',
+      pinned: false,
+      deleted: false,
+      group: $('eq-group-input').value.trim(),
+      cycle: Number($('eq-cycle').value),
+    };
+    if ($('eq-code').value.trim()) note.code = $('eq-code').value.trim();
+    if ($('eq-location').value.trim()) note.location = $('eq-location').value.trim();
+    return note;
+  }
+  $('eq-form').onsubmit = async event => {
+    event.preventDefault();
+    if (eqBusy || !eqEditing || !$('eq-form').reportValidity()) return;
+    eqBusy = true;
+    $('eq-save').disabled = true;
+    try {
+      await commit(eqEditing.id, eqEditing.key, equipmentFromForm(), eqEditing.parents);
+      $('eq-dialog').close();
+      eqEditing = null;
+    } catch (error) {
+      showMessage('eq-message', error.message);
+    } finally {
+      eqBusy = false;
+      $('eq-save').disabled = false;
+    }
+  };
+  $('eq-close').onclick = $('eq-cancel').onclick = () => $('eq-dialog').close();
+  $('eq-history-open').onclick = () => {
+    const id = eqEditing?.id;
+    $('eq-dialog').close();
+    if (id) showHistory(id);
+  };
+  $('eq-add').onclick = () => openEquipment();
+
+  // Pasted list: name, group, number, place, cycle (comma or tab separated; Excel columns paste as tabs).
+  function parseEquipmentLines(text) {
+    const items = [],
+      problems = [];
+    String(text)
+      .split(/\r?\n/)
+      .forEach((line, index) => {
+        if (!line.trim()) return;
+        const cells = line.split(line.includes('\t') ? '\t' : ',').map(c => c.trim());
+        const [title, group, code, location, cycleText] = cells;
+        const note = {
+          title: title || '',
+          content: '',
+          category: EQUIP,
+          status: 'todo',
+          pinned: false,
+          deleted: false,
+          group: group || '기타',
+          cycle: cycleText ? Number(cycleText) : 30,
+        };
+        if (code) note.code = code;
+        if (location) note.location = location;
+        const probe = {
+          schema: 1,
+          id: randomId(),
+          noteId: randomId(),
+          parents: [],
+          at: new Date().toISOString(),
+          note: { ...note, author: author || '확인' },
+        };
+        if (core.validEvent(probe)) items.push(note);
+        else problems.push(index + 1);
+      });
+    return { items, problems };
+  }
+  $('eq-bulk').onclick = () => {
+    if (!equipmentWritable()) return;
+    $('eq-bulk-message').hidden = true;
+    $('eq-bulk-save').disabled = false;
+    $('eq-bulk-dialog').showModal();
+    $('eq-bulk-text').focus();
+  };
+  $('eq-bulk-close').onclick = $('eq-bulk-cancel').onclick = () => !eqBusy && $('eq-bulk-dialog').close();
+  $('eq-bulk-save').onclick = async () => {
+    if (eqBusy) return;
+    const { items, problems } = parseEquipmentLines($('eq-bulk-text').value);
+    if (problems.length)
+      return showMessage(
+        'eq-bulk-message',
+        problems.slice(0, 10).join(', ') +
+          '번째 줄을 확인해 주세요. 장비명(120자), 분류(30자), 관리번호·위치(40자), 주기(1~366일 정수)를 넘지 않아야 합니다.',
+      );
+    if (!items.length) return showMessage('eq-bulk-message', '추가할 장비가 없습니다.');
+    if (items.length > 100) return showMessage('eq-bulk-message', '한 번에 100개까지 추가할 수 있습니다. 나눠서 붙여 넣어 주세요.');
+    eqBusy = true;
+    $('eq-bulk-save').disabled = true;
+    let added = 0;
+    try {
+      for (const note of items) {
+        await commit(randomId(), '', note, []);
+        added++;
+        showMessage('eq-bulk-message', added + ' / ' + items.length + '개 추가 중…', true);
+      }
+      $('eq-bulk-text').value = '';
+      $('eq-bulk-dialog').close();
+      toast('장비 ' + added + '개를 추가했습니다.');
+    } catch (error) {
+      showMessage('eq-bulk-message', added + '개를 추가한 뒤 멈췄습니다: ' + error.message);
+    } finally {
+      eqBusy = false;
+      $('eq-bulk-save').disabled = false;
+    }
+  };
+
+  // Inspection sheet: pick the items checked today and their results.
+  function openSheet({ sheetId, preselect } = {}) {
+    if (!equipmentWritable()) return;
+    const today = calendarToday();
+    const status = core.equipmentStatus(notes, today);
+    const sheet = sheetId ? notes.find(n => n.id === sheetId) : null;
+    const picks = new Map();
+    if (sheet) for (const r of sheet.results) picks.set(r.e, { on: true, r: r.r, m: r.m || '' });
+    else if (preselect) picks.set(preselect, { on: true, r: '정상', m: '' });
+    else for (const item of status) if (item.overdue || !item.last) picks.set(item.note.id, { on: true, r: '정상', m: '' });
+    // An old sheet may name equipment that has since been moved to the trash; it stays listed so the sheet can be kept as it was.
+    const rows = status.map(item => ({ id: item.note.id, note: item.note, item }));
+    if (sheet)
+      for (const r of sheet.results)
+        if (!rows.some(row => row.id === r.e)) rows.push({ id: r.e, note: notes.find(n => n.id === r.e) || null, item: null });
+    sheetEditing = {
+      id: sheet?.id || randomId(),
+      key: core.headKey(sheet),
+      parents: sheet ? sheet.heads.map(e => e.id) : [],
+      picks,
+      rows,
+      sheet,
+    };
+    $('sheet-title-head').textContent = sheet ? '점검표 수정' : '점검 기록';
+    $('sheet-date').value = sheet?.date || today;
+    $('sheet-name').value = sheet?.title || shortDay(today) + ' 장비 점검';
+    $('sheet-content').value = sheet?.content || '';
+    $('sheet-trash').hidden = !sheet;
+    $('sheet-message').hidden = true;
+    $('sheet-save').disabled = false;
+    renderSheetRows();
+    $('sheet-dialog').showModal();
+  }
+  function renderSheetRows() {
+    const { picks, rows } = sheetEditing;
+    if (!rows.length) {
+      $('sheet-rows').replaceChildren(el('p', 'ho-empty', '먼저 장비를 추가해 주세요.'));
+      updateSheetCount();
+      return;
+    }
+    let group = null;
+    const parts = [];
+    for (const row of rows) {
+      const name = row.note ? row.note.title : '(알 수 없는 장비)';
+      const rowGroup = row.item ? row.note.group : '휴지통의 장비';
+      if (rowGroup !== group) {
+        group = rowGroup;
+        parts.push(el('h4', 'sheet-group', group));
+      }
+      const pick = picks.get(row.id) || { on: false, r: '정상', m: '' };
+      const line = el('div', 'sheet-row' + (pick.on ? ' on' : ''));
+      const box = el('input');
+      box.type = 'checkbox';
+      box.checked = pick.on;
+      box.setAttribute('aria-label', name + ' 점검');
+      const label = el('label', 'sheet-name');
+      const sub = row.item
+        ? row.item.last
+          ? '최근 ' + shortDay(row.item.last.date) + ' ' + row.item.last.result + (row.item.overdue ? ' · 기한 지남' : '')
+          : '미점검'
+        : '휴지통';
+      label.append(box, el('span', '', name), el('small', '', sub));
+      const results = el('div', 'sheet-results');
+      results.setAttribute('role', 'group');
+      results.setAttribute('aria-label', name + ' 결과');
+      const memo = el('input', 'sheet-memo');
+      memo.maxLength = 200;
+      memo.placeholder = '메모(선택)';
+      memo.value = pick.m;
+      memo.setAttribute('aria-label', name + ' 메모');
+      const set = patch => {
+        const next = { ...(picks.get(row.id) || { on: false, r: '정상', m: '' }), ...patch };
+        picks.set(row.id, next);
+        line.classList.toggle('on', next.on);
+        box.checked = next.on;
+        results.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.r === next.r)));
+        updateSheetCount();
+      };
+      for (const result of core.INSPECTION_RESULTS) {
+        const b = el('button', 'sheet-result ' + RESULT_CLASS[result], result);
+        b.type = 'button';
+        b.dataset.r = result;
+        b.setAttribute('aria-pressed', String(pick.r === result));
+        b.onclick = () => set({ r: result, on: true });
+        results.append(b);
+      }
+      box.onchange = () => set({ on: box.checked });
+      memo.oninput = () => set({ m: memo.value, on: memo.value.trim() ? true : (picks.get(row.id) || {}).on });
+      line.append(label, results, memo);
+      parts.push(line);
+    }
+    $('sheet-rows').replaceChildren(...parts);
+    updateSheetCount();
+  }
+  function updateSheetCount() {
+    const on = [...sheetEditing.picks.values()].filter(p => p.on);
+    const bad = on.filter(p => p.r !== '정상').length;
+    $('sheet-count').textContent = '선택 ' + on.length + '개' + (bad ? ' · 조치 ' + bad + '개' : '');
+  }
+  function pickAll(test) {
+    for (const row of sheetEditing.rows) {
+      const current = sheetEditing.picks.get(row.id) || { on: false, r: '정상', m: '' };
+      sheetEditing.picks.set(row.id, { ...current, on: test(row) });
+    }
+    renderSheetRows();
+  }
+  $('sheet-pick-all').onclick = () => pickAll(row => !!row.item);
+  $('sheet-pick-none').onclick = () => pickAll(() => false);
+  $('sheet-pick-attention').onclick = () => pickAll(row => !!row.item && (row.item.overdue || !row.item.last));
+  $('sheet-all-ok').onclick = () => {
+    for (const [id, pick] of sheetEditing.picks) if (pick.on) sheetEditing.picks.set(id, { ...pick, r: '정상' });
+    renderSheetRows();
+  };
+  $('sheet-close').onclick = $('sheet-cancel').onclick = () => !eqBusy && $('sheet-dialog').close();
+  $('sheet-save').onclick = async () => {
+    if (eqBusy || !sheetEditing) return;
+    const results = [...sheetEditing.picks]
+      .filter(([, pick]) => pick.on)
+      .map(([e, pick]) => {
+        const result = { e, r: pick.r };
+        const memo = pick.m.trim().slice(0, 200);
+        if (memo) result.m = memo;
+        return result;
+      });
+    const date = $('sheet-date').value,
+      title = $('sheet-name').value.trim();
+    if (!date) return showMessage('sheet-message', '점검일을 정해 주세요.');
+    if (!title) return showMessage('sheet-message', '점검표 이름을 입력해 주세요.');
+    if (!results.length) return showMessage('sheet-message', '점검한 장비를 하나 이상 선택해 주세요.');
+    if (results.length > core.MAX_SHEET_ITEMS)
+      return showMessage(
+        'sheet-message',
+        '점검표 하나에는 장비 ' + core.MAX_SHEET_ITEMS + '개까지 담을 수 있습니다. 나눠서 기록해 주세요.',
+      );
+    eqBusy = true;
+    $('sheet-save').disabled = true;
+    try {
+      await commit(
+        sheetEditing.id,
+        sheetEditing.key,
+        { title, content: $('sheet-content').value, category: INSPECT, status: 'done', pinned: false, deleted: false, date, results },
+        sheetEditing.parents,
+      );
+      $('sheet-dialog').close();
+      sheetEditing = null;
+    } catch (error) {
+      showMessage('sheet-message', error.message);
+    } finally {
+      eqBusy = false;
+      $('sheet-save').disabled = false;
+    }
+  };
+  {
+    const trash = $('sheet-trash');
+    const label = trash.querySelector('span');
+    let timer;
+    trash.onclick = async () => {
+      if (!trash.classList.contains('armed')) {
+        trash.classList.add('armed');
+        label.textContent = '한 번 더 누르면 삭제';
+        timer = setTimeout(() => {
+          trash.classList.remove('armed');
+          label.textContent = '점검표 삭제';
+        }, 5000);
+        return;
+      }
+      clearTimeout(timer);
+      trash.classList.remove('armed');
+      label.textContent = '점검표 삭제';
+      if (eqBusy || !sheetEditing?.sheet) return;
+      eqBusy = true;
+      try {
+        if (await patchNote(sheetEditing.id, plainSheet, { deleted: true })) {
+          $('sheet-dialog').close();
+          sheetEditing = null;
+          toast('점검표를 휴지통으로 옮겼습니다. 휴지통에서 복구할 수 있습니다.');
+        }
+      } catch (error) {
+        showMessage('sheet-message', error.message);
+      } finally {
+        eqBusy = false;
+      }
+    };
+  }
+  $('eq-check').onclick = () => openSheet();
+
+  function openEquipmentLog(id) {
+    const note = notes.find(n => n.id === id);
+    if (!note) return;
+    const rows = core.inspectionHistory(notes, id);
+    const counts = core.INSPECTION_RESULTS.map(r => [r, rows.filter(x => x.result === r).length]).filter(([, n]) => n);
+    $('eq-log-title').textContent = note.title + ' 점검 이력';
+    $('eq-log-info').textContent =
+      [note.group, note.code, note.location, note.cycle + '일마다 점검'].filter(Boolean).join(' · ') +
+      ' · 누적 ' +
+      rows.length +
+      '회' +
+      (counts.length ? ' (' + counts.map(([r, n]) => r + ' ' + n).join(', ') + ')' : '');
+    const items = rows.map(row => {
+      const li = el('li');
+      const head = el('div', 'eq-log-head');
+      head.append(
+        el('strong', '', shortDay(row.date) + ' ' + row.date.slice(0, 4)),
+        resultChip(row.result),
+        el('small', '', row.author + ' · ' + row.sheetTitle),
+      );
+      li.append(head);
+      if (row.memo) li.append(el('p', 'eq-memo', row.memo));
+      const open = el('button', 'text-button', '점검표 열기');
+      open.type = 'button';
+      open.onclick = () => {
+        $('eq-log-dialog').close();
+        openSheet({ sheetId: row.sheetId });
+      };
+      li.append(open);
+      return li;
+    });
+    const extra = el('li', 'eq-log-foot');
+    const revisions = el('button', 'secondary', '장비 정보 수정 기록');
+    revisions.type = 'button';
+    revisions.onclick = () => {
+      $('eq-log-dialog').close();
+      showHistory(id);
+    };
+    extra.append(revisions);
+    $('eq-log-list').replaceChildren(...(items.length ? items : [el('li', 'ho-empty', '아직 점검 기록이 없습니다.')]), extra);
+    $('eq-log-dialog').showModal();
+  }
+  $('eq-log-close').onclick = () => $('eq-log-dialog').close();
+  document.querySelectorAll('[data-eqfilter]').forEach(
+    b =>
+      (b.onclick = () => {
+        eqFilter = b.dataset.eqfilter;
+        renderEquipment();
+      }),
+  );
+  $('eq-group').onchange = () => renderEquipment();
+  $('eq-search').oninput = () => renderEquipment();
+
   function setView(next) {
     view = next;
     document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
@@ -1325,7 +1899,9 @@
                 ? '인수인계'
                 : view === 'files'
                   ? '파일'
-                  : view;
+                  : view === 'equipment'
+                    ? '장비 점검'
+                    : view;
     $('breadcrumb-view').textContent = name;
     $('page-title').textContent = view === 'all' ? '오늘의 기록을, 함께.' : name;
     $('page-subtitle').textContent =
@@ -1333,25 +1909,37 @@
         ? '인수인계부터 작은 업무 메모까지. 한곳에 남기고 함께 확인하세요.'
         : view === 'files'
           ? '같은 부서원끼리 주고받는 임시 파일함입니다. 올린 파일은 최대 7일 뒤 자동으로 삭제됩니다.'
-          : view === 'handover'
-            ? '체크해서 마무리하고, 끝나지 않은 일은 다음 근무일로 자동으로 넘어갑니다.'
-            : view === 'calendar'
-              ? '24시간 3팀 근무와 휴가·교육·교대·훈련 일정을 함께 확인하세요.'
-              : view === 'trash'
-                ? '필요한 기록은 수정 이력에서 다시 복구할 수 있어요.'
-                : view === 'done'
-                  ? '함께 마무리한 업무와 확인한 내용을 모아 봅니다.'
-                  : '동료에게 전달할 내용을 남기고, 진행 상황을 함께 확인하세요.';
+          : view === 'equipment'
+            ? '소방장비 목록을 관리하고 점검 결과를 쌓아 갑니다. 점검 주기가 지난 장비는 먼저 보여 드립니다.'
+            : view === 'handover'
+              ? '체크해서 마무리하고, 끝나지 않은 일은 다음 근무일로 자동으로 넘어갑니다.'
+              : view === 'calendar'
+                ? '24시간 3팀 근무와 휴가·교육·교대·훈련 일정을 함께 확인하세요.'
+                : view === 'trash'
+                  ? '필요한 기록은 수정 이력에서 다시 복구할 수 있어요.'
+                  : view === 'done'
+                    ? '함께 마무리한 업무와 확인한 내용을 모아 봅니다.'
+                    : '동료에게 전달할 내용을 남기고, 진행 상황을 함께 확인하세요.';
     $('section-title').firstChild.textContent = view === 'all' ? '함께 보는 메모 ' : name + ' ';
     const calendar = view === 'calendar',
       handover = view === 'handover',
-      files = view === 'files';
+      files = view === 'files',
+      equipment = view === 'equipment';
     $('calendar-section').hidden = !calendar;
     $('handover-section').hidden = !handover;
     $('files-section').hidden = !files;
-    $('board-section').hidden = calendar || handover || files;
-    $('stats').hidden = calendar || handover || files;
-    $('new-note').lastChild.textContent = calendar ? '일정 추가' : handover ? '항목 추가' : files ? '파일 선택' : '새 메모';
+    $('equipment-section').hidden = !equipment;
+    $('board-section').hidden = calendar || handover || files || equipment;
+    $('stats').hidden = calendar || handover || files || equipment;
+    $('new-note').lastChild.textContent = calendar
+      ? '일정 추가'
+      : handover
+        ? '항목 추가'
+        : files
+          ? '파일 선택'
+          : equipment
+            ? '장비 추가'
+            : '새 메모';
     render();
     if (handover) $('ho-input').focus({ preventScroll: true });
     if (files) refreshFiles();
@@ -1551,7 +2139,9 @@
         ? $('ho-input').focus()
         : view === 'files'
           ? $('file-pick').click()
-          : openEditor();
+          : view === 'equipment'
+            ? openEquipment()
+            : openEditor();
   $('empty-new').onclick = () => openEditor();
   document.querySelectorAll('[data-calmode]').forEach(b => (b.onclick = () => setCalMode(b.dataset.calmode)));
   $('cal-prev').onclick = () => shiftMonth(-1);
@@ -2220,6 +2810,8 @@
     if (kind === 'logbook') download(base + '인수인계일지.csv', ex.logbookCsv(core, notes, todayKey(), rotating, core.teamOn), csv);
     else if (kind === 'items') download(base + '항목목록.csv', ex.itemsCsv(notes), csv);
     else if (kind === 'revisions') download(base + '수정이력.csv', ex.revisionsCsv(events.values()), csv);
+    else if (kind === 'equipment') download(base + '장비목록.csv', ex.equipmentCsv(core, notes, core.koreanDay(Date.now())), csv);
+    else if (kind === 'inspections') download(base + '장비점검이력.csv', ex.inspectionsCsv(core, notes), csv);
     else
       download(
         base + '백업.json',
@@ -2228,6 +2820,8 @@
       );
     showMessage('export-message', '파일을 내려받았습니다 (기록 ' + events.size + '건).', true);
   }
+  $('eq-csv-list').onclick = () => exportKind('equipment').then(() => toast('장비 목록을 내려받았습니다.'));
+  $('eq-csv-log').onclick = () => exportKind('inspections').then(() => toast('점검 이력을 내려받았습니다.'));
   document.querySelectorAll('[data-export]').forEach(b => (b.onclick = () => exportKind(b.dataset.export)));
   $('export-open').onclick = $('export-backup').onclick = () => {
     $('export-message').hidden = true;
